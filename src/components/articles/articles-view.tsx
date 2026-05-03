@@ -210,7 +210,7 @@ function ArticleRow({ article, questionTitle }: { article: ArticleListItem; ques
             </button>
           </div>
         ) : (
-          <button className="question-title-button" type="button" disabled>
+          <button className="question-title-button" type="button" onClick={() => void openArticleBody()}>
             {article.title}
           </button>
         )}

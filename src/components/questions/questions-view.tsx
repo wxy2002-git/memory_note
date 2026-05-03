@@ -221,9 +221,30 @@ function QuestionRow({ question }: { question: QuestionListItem }) {
   );
 }
 
+type QuestionFilter = "all" | "no-answers" | "has-titles" | "has-body" | "recent";
+
+function filterQuestions(questions: QuestionListItem[], filter: QuestionFilter) {
+  switch (filter) {
+    case "no-answers":
+      return questions.filter((q) => q.answerCount === 0);
+    case "has-titles":
+      return questions.filter((q) => q.answerCount > 0 && q.nonEmptyBodyCount === 0);
+    case "has-body":
+      return questions.filter((q) => q.nonEmptyBodyCount > 0);
+    case "recent":
+      return [...questions].sort(
+        (a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime()
+      );
+    default:
+      return questions;
+  }
+}
+
 export function QuestionsView() {
   const [search, setSearch] = useState("");
+  const [filter, setFilter] = useState<QuestionFilter>("all");
   const questions = useQuestions(search);
+  const filteredQuestions = questions.data ? filterQuestions(questions.data, filter) : undefined;
 
   return (
     <section className="questions-layout">
@@ -231,7 +252,7 @@ export function QuestionsView() {
         <div>
           <p className="eyebrow">问题库</p>
           <h1>围绕问题管理阅读材料</h1>
-          <p>第一批实现先跑通登录、问题创建、模糊查询、完全重名拦截和统计展示。</p>
+          <p>搜索、筛选和管理你的问题库。</p>
         </div>
       </div>
 
@@ -247,19 +268,37 @@ export function QuestionsView() {
                 onChange={(event) => setSearch(event.target.value)}
               />
             </div>
+            <div className="filter-tabs">
+              {([
+                ["all", "全部"],
+                ["no-answers", "无回答"],
+                ["has-titles", "仅标题"],
+                ["has-body", "有正文"],
+                ["recent", "最近更新"]
+              ] as const).map(([value, label]) => (
+                <button
+                  key={value}
+                  type="button"
+                  className={`filter-tab ${filter === value ? "active" : ""}`}
+                  onClick={() => setFilter(value)}
+                >
+                  {label}
+                </button>
+              ))}
+            </div>
           </div>
 
           {questions.isLoading ? <p className="state-text">正在读取问题库...</p> : null}
           {questions.error ? <p className="form-error">{getReadableError(questions.error)}</p> : null}
-          {!questions.isLoading && !questions.data?.length ? (
+          {!questions.isLoading && !filteredQuestions?.length ? (
             <div className="empty-state">
-              <h2>还没有问题</h2>
-              <p>先创建一个你正在追问的主题，之后就可以往里面放文章和见解。</p>
+              <h2>{search || filter !== "all" ? "没有匹配的问题" : "还没有问题"}</h2>
+              <p>{search || filter !== "all" ? "尝试调整搜索条件或筛选。" : "先创建一个你正在追问的主题，之后就可以往里面放文章和见解。"}</p>
             </div>
           ) : null}
 
           <div className="question-list">
-            {questions.data?.map((question) => <QuestionRow key={question.id} question={question} />)}
+            {filteredQuestions?.map((question) => <QuestionRow key={question.id} question={question} />)}
           </div>
         </div>
 

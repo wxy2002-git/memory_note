@@ -4,7 +4,10 @@ import "./globals.css";
 
 export const metadata: Metadata = {
   title: "note-remeber",
-  description: "Question-centered reading memory workspace"
+  description: "Question-centered reading memory workspace",
+  icons: {
+    icon: "/favicon.svg"
+  }
 };
 
 export default function RootLayout({

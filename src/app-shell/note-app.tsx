@@ -7,6 +7,7 @@ import { LoginView } from "@/components/auth/login-view";
 import { QuestionsView } from "@/components/questions/questions-view";
 import { ArticlesView } from "@/components/articles/articles-view";
 import { DocumentView } from "@/components/documents/document-view";
+import { ErrorBoundary } from "@/components/common/error-boundary";
 import { getReadableError } from "@/data/errors";
 import { useNavigationState } from "@/hooks/use-navigation-state";
 
@@ -63,8 +64,9 @@ function AppContent() {
   }
 
   return (
-    <main className="workspace">
-      <header className="topbar">
+    <ErrorBoundary>
+      <main className="workspace">
+        <header className="topbar">
         <div className="brand">
           <BookOpen size={18} />
           <span>note-remeber</span>
@@ -125,7 +127,8 @@ function AppContent() {
           originArticleTitle={view.originArticleTitle}
         />
       ) : null}
-    </main>
+      </main>
+    </ErrorBoundary>
   );
 }
 

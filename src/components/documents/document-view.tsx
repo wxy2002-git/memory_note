@@ -1,10 +1,12 @@
 "use client";
 
-import { ArrowLeft, BookOpen, FileText, Lightbulb } from "lucide-react";
+import { ArrowLeft, BookOpen, Check, FileText, Lightbulb } from "lucide-react";
+import { useRef, useState } from "react";
 import { ensureArticleDocument } from "@/data/articles";
 import { uploadImageAsset } from "@/data/assets";
 import { getPreferredArticleContext, resolveQuestionJump } from "@/data/derived-questions";
 import { getReadableError } from "@/data/errors";
+import { useAddDerivedQuestion } from "@/hooks/use-derived-questions";
 import { useDocument, useSaveDocument } from "@/hooks/use-document";
 import { useNavigationState } from "@/hooks/use-navigation-state";
 import { DerivedQuestionsPanel } from "@/components/derived-questions/derived-questions-panel";
@@ -73,8 +75,11 @@ export function DocumentView({
 }: DocumentViewProps) {
   const document = useDocument(documentId);
   const saveDocument = useSaveDocument(documentId);
+  const addDerivedQuestion = useAddDerivedQuestion(documentId);
   const openAnswers = useNavigationState((state) => state.openAnswers);
   const openDocument = useNavigationState((state) => state.openDocument);
+  const [derivedToast, setDerivedToast] = useState<string | null>(null);
+  const derivedToastTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   async function openArticleInsight() {
     if (!articleId) {
@@ -175,7 +180,27 @@ export function DocumentView({
     });
   }
 
+  function showToast(message: string) {
+    setDerivedToast(message);
+    if (derivedToastTimer.current) {
+      clearTimeout(derivedToastTimer.current);
+    }
+    derivedToastTimer.current = setTimeout(() => setDerivedToast(null), 2800);
+  }
+
+  function handleCreateDerivedFromSelection(selectedText: string) {
+    const title = selectedText.trim()
+      ? `什么是"${selectedText.slice(0, 60)}"${selectedText.length > 60 ? "..." : ""}？`
+      : "";
+    if (!title) return;
+    addDerivedQuestion.mutate(title, {
+      onSuccess: () => showToast("已添加到衍生问题"),
+      onError: () => showToast("添加衍生问题失败，请重试")
+    });
+  }
+
   const canShowDerivedPanel = !derivedJump && (documentType === "article_body" || documentType === "question_insight");
+  const canShowDerivedBubble = !derivedJump && (documentType === "article_body" || documentType === "question_insight");
 
   return (
     <section className="document-layout">
@@ -225,6 +250,12 @@ export function DocumentView({
       {document.isLoading ? <p className="state-text">正在读取正文...</p> : null}
       {document.error ? <p className="form-error">{getReadableError(document.error)}</p> : null}
       {saveDocument.error ? <p className="form-error">{getReadableError(saveDocument.error)}</p> : null}
+      {derivedToast ? (
+        <p className="toast-message">
+          <Check size={14} /> {derivedToast}
+        </p>
+      ) : null}
+      {addDerivedQuestion.error ? <p className="form-error">{getReadableError(addDerivedQuestion.error)}</p> : null}
 
       {document.data ? (
         <div className={canShowDerivedPanel ? "document-workspace with-side-panel" : "document-workspace"}>
@@ -233,13 +264,15 @@ export function DocumentView({
               key={document.data.id}
               initialContentJson={document.data.contentJson}
               initialVersion={document.data.contentVersion}
-            placeholder={getPlaceholder(documentType)}
-            onImageUpload={(file) => uploadImageAsset(document.data.id, file)}
-            onSave={(input) =>
-              saveDocument.mutateAsync({
+              placeholder={getPlaceholder(documentType)}
+              onImageUpload={(file) => uploadImageAsset(document.data.id, file)}
+              onSave={(input) =>
+                saveDocument.mutateAsync({
                   ...input
                 })
               }
+              showDerivedQuestionEntry={canShowDerivedBubble}
+              onCreateDerivedQuestion={handleCreateDerivedFromSelection}
             />
             <FlowchartPanel documentId={document.data.id} />
           </div>
