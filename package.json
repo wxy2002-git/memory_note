@@ -1,0 +1,47 @@
+{
+  "name": "note-remeber",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "dev": "next dev",
+    "build": "next build",
+    "start": "next start",
+    "serve:out": "node scripts/serve-out.mjs",
+    "check:setup": "node scripts/check-setup.mjs",
+    "check:supabase": "node scripts/check-supabase.mjs"
+  },
+  "dependencies": {
+    "@supabase/supabase-js": "^2.105.1",
+    "@tanstack/react-query": "^5.100.8",
+    "@tiptap/extension-color": "^3.22.5",
+    "@tiptap/extension-font-family": "^3.22.5",
+    "@tiptap/extension-highlight": "^3.22.5",
+    "@tiptap/extension-image": "^3.22.5",
+    "@tiptap/extension-link": "^3.22.5",
+    "@tiptap/extension-placeholder": "^3.22.5",
+    "@tiptap/extension-table": "^3.22.5",
+    "@tiptap/extension-table-cell": "^3.22.5",
+    "@tiptap/extension-table-header": "^3.22.5",
+    "@tiptap/extension-table-row": "^3.22.5",
+    "@tiptap/extension-text-align": "^3.22.5",
+    "@tiptap/extension-text-style": "^3.22.5",
+    "@tiptap/extension-underline": "^3.22.5",
+    "@tiptap/react": "^3.22.5",
+    "@tiptap/starter-kit": "^3.22.5",
+    "@xyflow/react": "^12.10.2",
+    "dompurify": "^3.4.2",
+    "lucide-react": "1.14.0",
+    "next": "16.2.4",
+    "react": "19.2.5",
+    "react-dom": "19.2.5",
+    "zod": "^4.4.2",
+    "zustand": "^5.0.12"
+  },
+  "devDependencies": {
+    "@netlify/functions": "^5.2.0",
+    "@types/node": "25.6.0",
+    "@types/react": "19.2.14",
+    "@types/react-dom": "19.2.3",
+    "typescript": "6.0.3"
+  }
+}

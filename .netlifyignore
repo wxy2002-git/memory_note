@@ -1,0 +1,8 @@
+node_modules/
+.next/
+.git/
+.env.local
+out/
+netlify-static/
+deploy-*.zip
+npm-debug.log*
