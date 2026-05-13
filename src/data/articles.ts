@@ -1,6 +1,7 @@
 import { requireSupabaseBrowserClient } from "@/lib/supabase/client";
 import type { ArticleListItem, QuestionDetail } from "@/types/domain";
-import { listQuestions } from "@/data/questions";
+import { requireCurrentUser } from "@/data/auth";
+import { normalizeTitleInput, toLimitedSearchTerm } from "@/lib/text-limits";
 
 type ArticleOverviewRow = {
   article_id: string;
@@ -19,6 +20,14 @@ type ArticleOverviewRow = {
   updated_at: string;
 };
 
+type QuestionStatsRow = {
+  question_id: string;
+  answer_count: number | string | null;
+  non_empty_body_count: number | string | null;
+  has_question_insight: boolean | null;
+  question_insight_is_empty: boolean | null;
+};
+
 function toCount(value: number | string | null | undefined) {
   if (typeof value === "number") {
     return value;
@@ -33,27 +42,41 @@ function toCount(value: number | string | null | undefined) {
 
 export async function getQuestionDetail(questionId: string): Promise<QuestionDetail> {
   const supabase = requireSupabaseBrowserClient();
-  const { data, error } = await supabase
-    .from("questions")
-    .select("id,title,updated_at")
-    .eq("id", questionId)
-    .single();
+  const [
+    { data: questionData, error: questionError },
+    { data: statsData, error: statsError }
+  ] = await Promise.all([
+    supabase
+      .from("questions")
+      .select("id,title,updated_at")
+      .eq("id", questionId)
+      .single(),
+    supabase
+      .from("question_stats")
+      .select("question_id,answer_count,non_empty_body_count,has_question_insight,question_insight_is_empty")
+      .eq("question_id", questionId)
+      .maybeSingle()
+  ]);
 
-  if (error) {
-    throw error;
+  if (questionError) {
+    throw questionError;
   }
 
-  const matches = await listQuestions((data as { title: string }).title);
-  const matched = matches.find((question) => question.id === questionId);
+  if (statsError) {
+    throw statsError;
+  }
+
+  const question = questionData as { id: string; title: string; updated_at: string };
+  const stats = statsData as QuestionStatsRow | null;
 
   return {
-    id: (data as { id: string }).id,
-    title: (data as { title: string }).title,
-    answerCount: matched?.answerCount ?? 0,
-    nonEmptyBodyCount: matched?.nonEmptyBodyCount ?? 0,
-    hasQuestionInsight: matched?.hasQuestionInsight ?? false,
-    questionInsightIsEmpty: matched?.questionInsightIsEmpty ?? true,
-    updatedAt: (data as { updated_at: string }).updated_at
+    id: question.id,
+    title: question.title,
+    answerCount: toCount(stats?.answer_count),
+    nonEmptyBodyCount: toCount(stats?.non_empty_body_count),
+    hasQuestionInsight: Boolean(stats?.has_question_insight),
+    questionInsightIsEmpty: stats?.question_insight_is_empty ?? true,
+    updatedAt: question.updated_at
   };
 }
 
@@ -115,7 +138,7 @@ export async function listArticles(questionId: string, search: string): Promise<
     .order("sort_order", { ascending: true })
     .order("updated_at", { ascending: false });
 
-  const trimmed = search.trim();
+  const trimmed = toLimitedSearchTerm(search);
 
   if (trimmed) {
     query = query.ilike("title", `%${trimmed}%`);
@@ -183,24 +206,8 @@ export async function ensureQuestionInsight(questionId: string) {
 
 export async function createArticle(questionId: string, title: string): Promise<string> {
   const supabase = requireSupabaseBrowserClient();
-  const normalizedTitle = title.trim();
-
-  if (!normalizedTitle) {
-    throw new Error("回答标题不能为空。");
-  }
-
-  const {
-    data: { user },
-    error: userError
-  } = await supabase.auth.getUser();
-
-  if (userError) {
-    throw userError;
-  }
-
-  if (!user) {
-    throw new Error("请先登录。");
-  }
+  const normalizedTitle = normalizeTitleInput(title, "回答标题");
+  const user = await requireCurrentUser();
 
   const { data, error } = await supabase
     .from("answer_articles")
@@ -224,11 +231,7 @@ export async function createArticle(questionId: string, title: string): Promise<
 
 export async function updateArticleTitle(articleId: string, title: string) {
   const supabase = requireSupabaseBrowserClient();
-  const normalizedTitle = title.trim();
-
-  if (!normalizedTitle) {
-    throw new Error("回答标题不能为空。");
-  }
+  const normalizedTitle = normalizeTitleInput(title, "回答标题");
 
   const { error } = await supabase
     .from("answer_articles")

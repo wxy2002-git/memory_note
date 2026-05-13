@@ -1,4 +1,5 @@
 import { requireSupabaseBrowserClient } from "@/lib/supabase/client";
+import { requireCurrentUser } from "@/data/auth";
 
 type DeleteApiResult = {
   deleted?: boolean;
@@ -59,26 +60,20 @@ async function callDeleteFunction(path: string, body: Record<string, string>) {
   }
 
   if (!response.ok) {
-    throw new Error(result.error || "删除失败，请稍后重试。");
+    const errorMessage = result.error || "删除失败，请稍后重试。";
+
+    if (response.status === 500 && /Supabase URL|service role key/i.test(errorMessage)) {
+      return false;
+    }
+
+    throw new Error(errorMessage);
   }
 
   return true;
 }
 
 async function getCurrentUserId() {
-  const supabase = requireSupabaseBrowserClient();
-  const {
-    data: { user },
-    error
-  } = await supabase.auth.getUser();
-
-  if (error) {
-    throw error;
-  }
-
-  if (!user) {
-    throw new Error("请先登录。");
-  }
+  const user = await requireCurrentUser();
 
   return user.id;
 }

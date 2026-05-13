@@ -13,7 +13,8 @@ export function useAuth() {
   const userQuery = useQuery({
     queryKey: ["auth", "user"],
     queryFn: getCurrentUser,
-    enabled: config.configured
+    enabled: config.configured,
+    retry: 0
   });
 
   useEffect(() => {

@@ -1,6 +1,6 @@
 "use client";
 
-import { BookOpen, LogOut, Search } from "lucide-react";
+import { BookOpen, ChevronRight, LogOut, Search } from "lucide-react";
 import { AppQueryProvider } from "@/lib/query-client";
 import { useAuth } from "@/hooks/use-auth";
 import { LoginView } from "@/components/auth/login-view";
@@ -15,6 +15,70 @@ function AppContent() {
   const { config, user, isLoading, userError, signOut } = useAuth();
   const view = useNavigationState((state) => state.view);
   const openQuestions = useNavigationState((state) => state.openQuestions);
+  const openAnswers = useNavigationState((state) => state.openAnswers);
+  const openDocument = useNavigationState((state) => state.openDocument);
+
+  const breadcrumbs: Array<{
+    label: string;
+    isCurrent?: boolean;
+    onClick?: () => void;
+  }> = [{ label: "问题库", isCurrent: view.name === "questions", onClick: openQuestions }];
+
+  if (view.name === "answers") {
+    breadcrumbs.push({
+      label: "回答",
+      isCurrent: !view.questionTitle,
+      onClick: () => openAnswers(view.questionId, view.questionTitle)
+    });
+
+    if (view.questionTitle) {
+      breadcrumbs.push({
+        label: view.questionTitle,
+        isCurrent: true
+      });
+    }
+  }
+
+  if (view.name === "document") {
+    const questionId = view.questionId;
+    const questionTitle = view.questionTitle;
+
+    breadcrumbs.push({
+      label: "回答",
+      onClick: questionId ? () => openAnswers(questionId, questionTitle) : undefined
+    });
+
+    if (questionTitle) {
+      breadcrumbs.push({
+        label: questionTitle,
+        onClick: questionId ? () => openAnswers(questionId, questionTitle) : undefined
+      });
+    }
+
+    if (view.derivedJump) {
+      breadcrumbs.push({
+        label: "衍生跳转",
+        onClick:
+          view.originDocumentId && view.originDocumentType && view.originTitle
+            ? () =>
+                openDocument({
+                  documentId: view.originDocumentId!,
+                  documentType: view.originDocumentType!,
+                  title: view.originTitle!,
+                  questionId: view.originQuestionId,
+                  questionTitle: view.originQuestionTitle,
+                  articleId: view.originArticleId,
+                  articleTitle: view.originArticleTitle
+                })
+            : undefined
+      });
+    }
+
+    breadcrumbs.push({
+      label: view.title,
+      isCurrent: true
+    });
+  }
 
   if (!config.configured) {
     return (
@@ -85,13 +149,22 @@ function AppContent() {
         </nav>
         <div className="topbar-path">
           <Search size={15} />
-          <span>
-            {view.name === "answers"
-              ? `问题库 > 回答${view.questionTitle ? ` > ${view.questionTitle}` : ""}`
-              : view.name === "document"
-                ? `问题库 > 回答${view.questionTitle ? ` > ${view.questionTitle}` : ""} > ${view.derivedJump ? "衍生跳转 > " : ""}${view.title}`
-                : "问题库"}
-          </span>
+          <ol className="topbar-breadcrumbs" aria-label="当前位置">
+            {breadcrumbs.map((item, index) => (
+              <li key={`${item.label}-${index}`}>
+                {index > 0 ? <ChevronRight className="breadcrumb-separator" size={14} aria-hidden="true" /> : null}
+                {item.onClick && !item.isCurrent ? (
+                  <button className="breadcrumb-button" type="button" onClick={item.onClick} title={`跳转到${item.label}`}>
+                    {item.label}
+                  </button>
+                ) : (
+                  <span className="breadcrumb-current" aria-current={item.isCurrent ? "page" : undefined} title={item.label}>
+                    {item.label}
+                  </span>
+                )}
+              </li>
+            ))}
+          </ol>
         </div>
         <div className="topbar-user">
           <span>{user.email}</span>

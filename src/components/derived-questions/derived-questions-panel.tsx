@@ -2,6 +2,7 @@
 
 import { ArrowRight, BookOpen, Lightbulb, Plus, Search, Trash2, X } from "lucide-react";
 import { FormEvent, useMemo, useState } from "react";
+import { createPortal } from "react-dom";
 import { getPreferredArticleContext } from "@/data/derived-questions";
 import { getReadableError } from "@/data/errors";
 import {
@@ -12,10 +13,12 @@ import {
 } from "@/hooks/use-derived-questions";
 import { useNavigationState } from "@/hooks/use-navigation-state";
 import { useSimilarQuestions } from "@/hooks/use-questions";
+import { MAX_TITLE_LENGTH } from "@/lib/text-limits";
 import type { DerivedQuestionItem, DocumentType } from "@/types/domain";
 
 type DerivedQuestionsPanelProps = {
   documentId: string;
+  onClose?: () => void;
   origin: {
     documentId: string;
     documentType: DocumentType;
@@ -27,7 +30,7 @@ type DerivedQuestionsPanelProps = {
   };
 };
 
-export function DerivedQuestionsPanel({ documentId, origin }: DerivedQuestionsPanelProps) {
+export function DerivedQuestionsPanel({ documentId, onClose, origin }: DerivedQuestionsPanelProps) {
   const [search, setSearch] = useState("");
   const [newTitle, setNewTitle] = useState("");
   const [selected, setSelected] = useState<DerivedQuestionItem | null>(null);
@@ -39,6 +42,7 @@ export function DerivedQuestionsPanel({ documentId, origin }: DerivedQuestionsPa
   const similarQuestions = useSimilarQuestions(newTitle);
   const openDocument = useNavigationState((state) => state.openDocument);
   const normalizedTitle = newTitle.trim();
+  const titleTooLong = normalizedTitle.length > MAX_TITLE_LENGTH;
   const exactMatchInPanel = useMemo(
     () => derivedQuestions.data?.some((item) => item.title.trim() === normalizedTitle),
     [derivedQuestions.data, normalizedTitle]
@@ -47,7 +51,7 @@ export function DerivedQuestionsPanel({ documentId, origin }: DerivedQuestionsPa
   function handleAdd(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
 
-    if (!normalizedTitle || exactMatchInPanel) {
+    if (!normalizedTitle || titleTooLong || exactMatchInPanel) {
       return;
     }
 
@@ -145,6 +149,11 @@ export function DerivedQuestionsPanel({ documentId, origin }: DerivedQuestionsPa
           <p className="eyebrow">衍生问题</p>
           <h2>阅读中冒出来的问题</h2>
         </div>
+        {onClose ? (
+          <button className="tool-button panel-close-button" type="button" onClick={onClose} aria-label="收起衍生问题" title="收起">
+            <X size={16} />
+          </button>
+        ) : null}
       </div>
 
       <div className="search-input compact-search">
@@ -158,16 +167,18 @@ export function DerivedQuestionsPanel({ documentId, origin }: DerivedQuestionsPa
       </div>
 
       <form className="derived-create" onSubmit={handleAdd}>
-        <input
+        <textarea
           aria-label="新建衍生问题"
           placeholder="新建衍生问题..."
           value={newTitle}
+          maxLength={MAX_TITLE_LENGTH}
+          rows={2}
           onChange={(event) => setNewTitle(event.target.value)}
         />
         <button
           type="submit"
           className="icon-button"
-          disabled={!normalizedTitle || Boolean(exactMatchInPanel) || addDerived.isPending}
+          disabled={!normalizedTitle || titleTooLong || Boolean(exactMatchInPanel) || addDerived.isPending}
           aria-label="添加衍生问题"
         >
           <Plus size={16} />
@@ -180,6 +191,7 @@ export function DerivedQuestionsPanel({ documentId, origin }: DerivedQuestionsPa
             <span>全局相似问题</span>
             {similarQuestions.isFetching ? <small>查询中</small> : null}
           </div>
+          {titleTooLong ? <p className="form-error">衍生问题最多 {MAX_TITLE_LENGTH} 个字符。</p> : null}
           {exactMatchInPanel ? <p className="form-error">当前正文已记录这个衍生问题。</p> : null}
           {similarQuestions.data?.length ? (
             <ul>
@@ -224,7 +236,7 @@ export function DerivedQuestionsPanel({ documentId, origin }: DerivedQuestionsPa
         ))}
       </div>
 
-      {selected ? (
+      {selected && typeof document !== "undefined" ? createPortal(
         <div className="jump-dialog" role="dialog" aria-modal="true" aria-label="选择跳转目标">
           <div className="jump-card">
             <button className="jump-close" type="button" onClick={() => setSelected(null)} aria-label="关闭">
@@ -249,7 +261,8 @@ export function DerivedQuestionsPanel({ documentId, origin }: DerivedQuestionsPa
               </p>
             ) : null}
           </div>
-        </div>
+        </div>,
+        document.body
       ) : null}
     </aside>
   );

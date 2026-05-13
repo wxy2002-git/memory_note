@@ -7,11 +7,15 @@ import {
   removeDerivedQuestionLink,
   resolveQuestionJump
 } from "@/data/derived-questions";
+import { useDebouncedValue } from "@/hooks/use-debounced-value";
+import { toLimitedSearchTerm } from "@/lib/text-limits";
 
 export function useDerivedQuestions(documentId: string, search: string) {
+  const debouncedSearch = useDebouncedValue(toLimitedSearchTerm(search));
+
   return useQuery({
-    queryKey: ["derived-questions", documentId, search],
-    queryFn: () => listDerivedQuestions(documentId, search)
+    queryKey: ["derived-questions", documentId, debouncedSearch],
+    queryFn: () => listDerivedQuestions(documentId, debouncedSearch)
   });
 }
 

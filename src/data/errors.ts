@@ -16,6 +16,14 @@ export function getReadableError(error: unknown) {
       return "Supabase 还没有配置，请先填写 .env.local。";
     }
 
+    if (/Failed to fetch|NetworkError|Load failed/i.test(error.message)) {
+      return "网络请求失败，请检查 Supabase 项目地址、网络连接或稍后重试。";
+    }
+
+    if (/Supabase 请求超时|timed out|AbortError/i.test(error.message)) {
+      return "Supabase 请求超时，请检查网络后重试。";
+    }
+
     return error.message;
   }
 

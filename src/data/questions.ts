@@ -1,4 +1,6 @@
 import { requireSupabaseBrowserClient } from "@/lib/supabase/client";
+import { requireCurrentUser } from "@/data/auth";
+import { normalizeTitleInput, toLimitedSearchTerm } from "@/lib/text-limits";
 import type { QuestionListItem } from "@/types/domain";
 
 type QuestionRow = {
@@ -36,7 +38,7 @@ export async function listQuestions(search: string): Promise<QuestionListItem[]>
     .select("id,title,sort_order,created_at,updated_at")
     .order("updated_at", { ascending: false });
 
-  const trimmed = search.trim();
+  const trimmed = toLimitedSearchTerm(search);
 
   if (trimmed) {
     query = query.ilike("title", `%${trimmed}%`);
@@ -95,24 +97,8 @@ export async function searchSimilarQuestions(input: string): Promise<QuestionLis
 
 export async function createQuestion(title: string): Promise<string> {
   const supabase = requireSupabaseBrowserClient();
-  const normalizedTitle = title.trim();
-
-  if (!normalizedTitle) {
-    throw new Error("问题标题不能为空。");
-  }
-
-  const {
-    data: { user },
-    error: userError
-  } = await supabase.auth.getUser();
-
-  if (userError) {
-    throw userError;
-  }
-
-  if (!user) {
-    throw new Error("请先登录。");
-  }
+  const normalizedTitle = normalizeTitleInput(title, "问题标题");
+  const user = await requireCurrentUser();
 
   const { data, error } = await supabase
     .from("questions")
@@ -132,11 +118,7 @@ export async function createQuestion(title: string): Promise<string> {
 
 export async function updateQuestionTitle(questionId: string, title: string) {
   const supabase = requireSupabaseBrowserClient();
-  const normalizedTitle = title.trim();
-
-  if (!normalizedTitle) {
-    throw new Error("问题标题不能为空。");
-  }
+  const normalizedTitle = normalizeTitleInput(title, "问题标题");
 
   const { error } = await supabase
     .from("questions")

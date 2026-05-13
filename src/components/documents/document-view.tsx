@@ -1,7 +1,7 @@
 "use client";
 
-import { ArrowLeft, BookOpen, Check, FileText, Lightbulb } from "lucide-react";
-import { useRef, useState } from "react";
+import { ArrowLeft, BookOpen, Check, FileText, GitBranch, Lightbulb } from "lucide-react";
+import { useRef, useState, type CSSProperties, type PointerEvent as ReactPointerEvent } from "react";
 import { ensureArticleDocument } from "@/data/articles";
 import { uploadImageAsset } from "@/data/assets";
 import { getPreferredArticleContext, resolveQuestionJump } from "@/data/derived-questions";
@@ -31,6 +31,12 @@ type DocumentViewProps = {
   originArticleId?: string;
   originArticleTitle?: string;
 };
+
+type SidePanelKind = "derived" | "flowchart";
+
+function clampWidth(value: number, min: number, max: number) {
+  return Math.min(max, Math.max(min, value));
+}
 
 function getPlaceholder(documentType: DocumentType) {
   if (documentType === "question_insight") {
@@ -79,6 +85,9 @@ export function DocumentView({
   const openAnswers = useNavigationState((state) => state.openAnswers);
   const openDocument = useNavigationState((state) => state.openDocument);
   const [derivedToast, setDerivedToast] = useState<string | null>(null);
+  const [activeSidePanel, setActiveSidePanel] = useState<SidePanelKind | null>(null);
+  const [derivedPanelWidth, setDerivedPanelWidth] = useState(360);
+  const [flowchartPanelWidth, setFlowchartPanelWidth] = useState(640);
   const derivedToastTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   async function openArticleInsight() {
@@ -199,11 +208,49 @@ export function DocumentView({
     });
   }
 
+  function toggleSidePanel(panel: SidePanelKind) {
+    setActiveSidePanel((currentPanel) => (currentPanel === panel ? null : panel));
+  }
+
+  function startPanelResize(event: ReactPointerEvent<HTMLDivElement>, panel: SidePanelKind) {
+    event.preventDefault();
+
+    const startX = event.clientX;
+    const startWidth = panel === "derived" ? derivedPanelWidth : flowchartPanelWidth;
+    const minWidth = panel === "derived" ? 300 : 420;
+    const maxWidth = Math.max(minWidth, window.innerWidth - 96);
+
+    function handlePointerMove(moveEvent: PointerEvent) {
+      const nextWidth = clampWidth(startWidth + startX - moveEvent.clientX, minWidth, maxWidth);
+
+      if (panel === "derived") {
+        setDerivedPanelWidth(nextWidth);
+        return;
+      }
+
+      setFlowchartPanelWidth(nextWidth);
+    }
+
+    function stopResize() {
+      window.removeEventListener("pointermove", handlePointerMove);
+      window.removeEventListener("pointerup", stopResize);
+    }
+
+    window.addEventListener("pointermove", handlePointerMove);
+    window.addEventListener("pointerup", stopResize);
+  }
+
   const canShowDerivedPanel = !derivedJump && (documentType === "article_body" || documentType === "question_insight");
   const canShowDerivedBubble = !derivedJump && (documentType === "article_body" || documentType === "question_insight");
+  const activePanelWidth = activeSidePanel === "derived" ? derivedPanelWidth : flowchartPanelWidth;
+  const workspaceStyle = activeSidePanel
+    ? ({
+        "--document-side-panel-width": `${activePanelWidth}px`
+      } as CSSProperties)
+    : undefined;
 
   return (
-    <section className="document-layout">
+    <section className={`document-layout ${activeSidePanel ? "with-side-panel" : ""}`} style={workspaceStyle}>
       <div className="document-heading">
         <div>
           <p className="eyebrow">{getDocumentLabel(documentType)}</p>
@@ -258,7 +305,8 @@ export function DocumentView({
       {addDerivedQuestion.error ? <p className="form-error">{getReadableError(addDerivedQuestion.error)}</p> : null}
 
       {document.data ? (
-        <div className={canShowDerivedPanel ? "document-workspace with-side-panel" : "document-workspace"}>
+        <>
+        <div className="document-workspace">
           <div className="document-main-stack">
             <RichTextEditor
               key={document.data.id}
@@ -274,11 +322,42 @@ export function DocumentView({
               showDerivedQuestionEntry={canShowDerivedBubble}
               onCreateDerivedQuestion={handleCreateDerivedFromSelection}
             />
-            <FlowchartPanel documentId={document.data.id} />
           </div>
+        </div>
+        <div className="document-side-dock" aria-label="正文侧边工具">
           {canShowDerivedPanel ? (
+            <button
+              className={`tool-button dock-button ${activeSidePanel === "derived" ? "active" : ""}`}
+              type="button"
+              onClick={() => toggleSidePanel("derived")}
+              aria-label="打开衍生问题"
+              title="衍生问题"
+            >
+              <Lightbulb size={17} />
+            </button>
+          ) : null}
+          <button
+            className={`tool-button dock-button ${activeSidePanel === "flowchart" ? "active" : ""}`}
+            type="button"
+            onClick={() => toggleSidePanel("flowchart")}
+            aria-label="打开流程图"
+            title="流程图"
+          >
+            <GitBranch size={17} />
+          </button>
+        </div>
+        {activeSidePanel === "derived" && canShowDerivedPanel ? (
+          <aside className="document-floating-panel derived-dock-panel" style={{ width: derivedPanelWidth }}>
+            <div
+              className="floating-panel-resize-handle"
+              role="separator"
+              aria-orientation="vertical"
+              aria-label="调整衍生问题面板宽度"
+              onPointerDown={(event) => startPanelResize(event, "derived")}
+            />
             <DerivedQuestionsPanel
               documentId={document.data.id}
+              onClose={() => setActiveSidePanel(null)}
               origin={{
                 documentId,
                 documentType,
@@ -289,8 +368,21 @@ export function DocumentView({
                 articleTitle
               }}
             />
-          ) : null}
-        </div>
+          </aside>
+        ) : null}
+        {activeSidePanel === "flowchart" ? (
+          <aside className="document-floating-panel flowchart-dock-panel" style={{ width: flowchartPanelWidth }}>
+            <div
+              className="floating-panel-resize-handle"
+              role="separator"
+              aria-orientation="vertical"
+              aria-label="调整流程图面板宽度"
+              onPointerDown={(event) => startPanelResize(event, "flowchart")}
+            />
+            <FlowchartPanel documentId={document.data.id} onClose={() => setActiveSidePanel(null)} />
+          </aside>
+        ) : null}
+        </>
       ) : null}
     </section>
   );

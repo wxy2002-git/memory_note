@@ -1,5 +1,6 @@
 import { getArticleContext } from "@/data/articles";
 import { requireSupabaseBrowserClient } from "@/lib/supabase/client";
+import { normalizeTitleInput, toLimitedSearchTerm } from "@/lib/text-limits";
 import type { DerivedQuestionItem, JumpResult } from "@/types/domain";
 
 type LinkRow = {
@@ -82,7 +83,7 @@ export async function listDerivedQuestions(documentId: string, search: string): 
 
   const questionsById = new Map(((questionRows ?? []) as unknown as QuestionRow[]).map((row) => [row.id, row]));
   const statsById = new Map(((statsRows ?? []) as unknown as QuestionStatsRow[]).map((row) => [row.question_id, row]));
-  const trimmedSearch = search.trim();
+  const trimmedSearch = toLimitedSearchTerm(search);
 
   return links
     .map((link) => {
@@ -112,11 +113,7 @@ export async function listDerivedQuestions(documentId: string, search: string): 
 
 export async function addDerivedQuestion(documentId: string, title: string) {
   const supabase = requireSupabaseBrowserClient();
-  const normalizedTitle = title.trim();
-
-  if (!normalizedTitle) {
-    throw new Error("衍生问题不能为空。");
-  }
+  const normalizedTitle = normalizeTitleInput(title, "衍生问题");
 
   const { data, error } = await supabase.rpc("add_derived_question", {
     p_source_document_id: documentId,

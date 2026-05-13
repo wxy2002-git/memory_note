@@ -1,4 +1,6 @@
 import { requireSupabaseBrowserClient } from "@/lib/supabase/client";
+import { requireCurrentUser } from "@/data/auth";
+import { normalizeTitleInput } from "@/lib/text-limits";
 import type { FlowchartListItem } from "@/types/domain";
 
 type FlowchartRow = {
@@ -50,19 +52,8 @@ export async function listFlowcharts(documentId: string): Promise<FlowchartListI
 
 export async function createFlowchart(documentId: string, title: string): Promise<string> {
   const supabase = requireSupabaseBrowserClient();
-  const normalizedTitle = title.trim() || "未命名流程图";
-  const {
-    data: { user },
-    error: userError
-  } = await supabase.auth.getUser();
-
-  if (userError) {
-    throw userError;
-  }
-
-  if (!user) {
-    throw new Error("请先登录。");
-  }
+  const normalizedTitle = title.trim() ? normalizeTitleInput(title, "流程图标题") : "未命名流程图";
+  const user = await requireCurrentUser();
 
   const { data, error } = await supabase
     .from("flowcharts")
@@ -73,9 +64,9 @@ export async function createFlowchart(documentId: string, title: string): Promis
       nodes: [
         {
           id: "start",
-          type: "default",
+          type: "flowNode",
           position: { x: 80, y: 120 },
-          data: { label: "中心主题" }
+          data: { label: "中心主题", shape: "process" }
         }
       ],
       edges: [],
@@ -93,11 +84,7 @@ export async function createFlowchart(documentId: string, title: string): Promis
 
 export async function updateFlowchartTitle(flowchartId: string, title: string) {
   const supabase = requireSupabaseBrowserClient();
-  const normalizedTitle = title.trim();
-
-  if (!normalizedTitle) {
-    throw new Error("流程图标题不能为空。");
-  }
+  const normalizedTitle = normalizeTitleInput(title, "流程图标题");
 
   const { error } = await supabase.from("flowcharts").update({ title: normalizedTitle }).eq("id", flowchartId);
 

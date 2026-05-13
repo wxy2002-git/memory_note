@@ -13,20 +13,32 @@ function isMissingSessionError(error: unknown) {
 
 export async function getCurrentUser(): Promise<AuthUser | null> {
   const supabase = requireSupabaseBrowserClient();
-  const { data, error } = await supabase.auth.getUser();
+  const { data, error } = await supabase.auth.getSession();
 
   if (error && !isMissingSessionError(error)) {
     throw error;
   }
 
-  if (!data.user) {
+  const user = data.session?.user;
+
+  if (!user) {
     return null;
   }
 
   return {
-    id: data.user.id,
-    email: data.user.email ?? null
+    id: user.id,
+    email: user.email ?? null
   };
+}
+
+export async function requireCurrentUser(): Promise<AuthUser> {
+  const user = await getCurrentUser();
+
+  if (!user) {
+    throw new Error("请先登录。");
+  }
+
+  return user;
 }
 
 export async function sendEmailOtp(email: string) {

@@ -41,7 +41,7 @@ import {
   Underline as UnderlineIcon,
   Undo2
 } from "lucide-react";
-import { ChangeEvent, useEffect, useMemo, useRef, useState } from "react";
+import { ChangeEvent, type ReactNode, useEffect, useMemo, useRef, useState } from "react";
 import type { SaveStatus } from "@/types/domain";
 
 type RichTextEditorProps = {
@@ -60,8 +60,48 @@ type RichTextEditorProps = {
   onCreateDerivedQuestion?: (selectedText: string) => void;
 };
 
-const textColors = ["#1f2937", "#0f766e", "#2563eb", "#7c3aed", "#c2410c", "#be123c"];
-const highlightColors = ["#fef08a", "#bbf7d0", "#bfdbfe", "#ddd6fe", "#fed7aa", "#fecdd3"];
+const textColors = [
+  { label: "黑色", value: "#111827" },
+  { label: "深灰", value: "#374151" },
+  { label: "灰色", value: "#6b7280" },
+  { label: "白色", value: "#ffffff" },
+  { label: "红色", value: "#dc2626" },
+  { label: "橙色", value: "#ea580c" },
+  { label: "琥珀", value: "#d97706" },
+  { label: "金色", value: "#ca8a04" },
+  { label: "青柠", value: "#65a30d" },
+  { label: "绿色", value: "#16a34a" },
+  { label: "青绿", value: "#0d9488" },
+  { label: "青色", value: "#0891b2" },
+  { label: "天蓝", value: "#0284c7" },
+  { label: "蓝色", value: "#2563eb" },
+  { label: "靛蓝", value: "#4f46e5" },
+  { label: "紫色", value: "#7c3aed" },
+  { label: "品红", value: "#c026d3" },
+  { label: "粉色", value: "#db2777" },
+  { label: "玫红", value: "#be123c" },
+  { label: "棕色", value: "#92400e" }
+];
+const highlightColors = [
+  { label: "黄色", value: "#fef08a" },
+  { label: "浅琥珀", value: "#fde68a" },
+  { label: "浅橙", value: "#fed7aa" },
+  { label: "浅红", value: "#fecaca" },
+  { label: "浅粉", value: "#fbcfe8" },
+  { label: "浅玫", value: "#fce7f3" },
+  { label: "浅紫", value: "#e9d5ff" },
+  { label: "浅靛", value: "#ddd6fe" },
+  { label: "浅蓝", value: "#bfdbfe" },
+  { label: "浅天蓝", value: "#bae6fd" },
+  { label: "浅青", value: "#a5f3fc" },
+  { label: "浅青绿", value: "#99f6e4" },
+  { label: "浅绿", value: "#bbf7d0" },
+  { label: "浅青柠", value: "#d9f99d" },
+  { label: "浅灰", value: "#e5e7eb" },
+  { label: "浅石色", value: "#e7e5e4" },
+  { label: "淡黄", value: "#fef3c7" },
+  { label: "淡蓝灰", value: "#e0f2fe" }
+];
 const fontFamilies = [
   { label: "默认字体", value: "" },
   { label: "黑体/雅黑", value: "'Microsoft YaHei', 'PingFang SC', 'Hiragino Sans GB', 'Source Han Sans SC', sans-serif" },
@@ -117,6 +157,80 @@ function getImageFilesFromDataTransfer(dataTransfer: DataTransfer | null | undef
   });
 }
 
+type ColorOption = {
+  label: string;
+  value: string;
+};
+
+type ColorPaletteButtonProps = {
+  ariaLabel: string;
+  clearLabel: string;
+  colors: ColorOption[];
+  currentColor: string;
+  icon: ReactNode;
+  isOpen: boolean;
+  onClear: () => void;
+  onSelect: (color: string) => void;
+  onToggle: () => void;
+};
+
+function ColorPaletteButton({
+  ariaLabel,
+  clearLabel,
+  colors,
+  currentColor,
+  icon,
+  isOpen,
+  onClear,
+  onSelect,
+  onToggle
+}: ColorPaletteButtonProps) {
+  return (
+    <div className="color-picker">
+      <button
+        type="button"
+        className={`tool-button color-trigger ${isOpen ? "active" : ""}`}
+        onMouseDown={(event) => event.preventDefault()}
+        onClick={onToggle}
+        title={ariaLabel}
+        aria-label={ariaLabel}
+        aria-expanded={isOpen}
+      >
+        {icon}
+        <span className="color-trigger-swatch" style={{ backgroundColor: currentColor }} />
+      </button>
+      {isOpen ? (
+        <div className="color-popover" role="menu" aria-label={ariaLabel}>
+          <button
+            type="button"
+            className="color-clear-button"
+            onMouseDown={(event) => event.preventDefault()}
+            onClick={onClear}
+            title={clearLabel}
+            aria-label={clearLabel}
+          >
+            <Eraser size={14} />
+          </button>
+          <div className="color-grid">
+            {colors.map((color) => (
+              <button
+                key={color.value}
+                type="button"
+                className={`color-swatch ${color.value.toLowerCase() === currentColor.toLowerCase() ? "active" : ""}`}
+                onMouseDown={(event) => event.preventDefault()}
+                onClick={() => onSelect(color.value)}
+                title={color.label}
+                aria-label={color.label}
+                style={{ backgroundColor: color.value }}
+              />
+            ))}
+          </div>
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
 export function RichTextEditor({
   initialContentJson,
   initialVersion,
@@ -129,9 +243,11 @@ export function RichTextEditor({
   const [saveStatus, setSaveStatus] = useState<SaveStatus>("idle");
   const [imageError, setImageError] = useState<string | null>(null);
   const [isUploadingImage, setIsUploadingImage] = useState(false);
+  const [openColorPalette, setOpenColorPalette] = useState<"text" | "highlight" | null>(null);
   const editorRef = useRef<Editor | null>(null);
   const saveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const imageInputRef = useRef<HTMLInputElement | null>(null);
+  const savedSelectionRef = useRef<{ from: number; to: number } | null>(null);
   const pendingImageUploads = useRef(0);
   const shouldSaveAfterImageUpload = useRef(false);
   const objectUrlsToRevoke = useRef(new Set<string>());
@@ -402,6 +518,79 @@ export function RichTextEditor({
     editor.chain().focus().unsetAllMarks().unsetTextAlign().clearNodes().run();
   }
 
+  function rememberSelection() {
+    if (!editor) {
+      return;
+    }
+
+    const { from, to } = editor.state.selection;
+    savedSelectionRef.current = { from, to };
+  }
+
+  function getSelectionChain() {
+    if (!editor) {
+      return null;
+    }
+
+    const selection = savedSelectionRef.current;
+    const chain = editor.chain().focus();
+
+    if (selection && selection.from !== selection.to) {
+      return chain.setTextSelection(selection);
+    }
+
+    return chain;
+  }
+
+  function setTextColor(color: string) {
+    const chain = getSelectionChain();
+
+    if (!chain) {
+      return;
+    }
+
+    chain.setColor(color).run();
+    setOpenColorPalette(null);
+  }
+
+  function clearTextColor() {
+    const chain = getSelectionChain();
+
+    if (!chain) {
+      return;
+    }
+
+    chain.unsetColor().run();
+    setOpenColorPalette(null);
+  }
+
+  function setHighlightColor(color: string) {
+    const chain = getSelectionChain();
+
+    if (!chain) {
+      return;
+    }
+
+    chain.setHighlight({ color }).run();
+    setOpenColorPalette(null);
+  }
+
+  function clearHighlightColor() {
+    const chain = getSelectionChain();
+
+    if (!chain) {
+      return;
+    }
+
+    chain.unsetHighlight().run();
+    setOpenColorPalette(null);
+  }
+
+  function toggleColorPalette(palette: "text" | "highlight") {
+    rememberSelection();
+    setOpenColorPalette((current) => (current === palette ? null : palette));
+  }
+
   async function uploadImages(files: File[]) {
     const activeEditor = editorRef.current ?? editor;
 
@@ -471,8 +660,9 @@ export function RichTextEditor({
   }
 
   const textStyleAttributes = editor.getAttributes("textStyle");
-  const currentTextColor = (textStyleAttributes.color as string | undefined) ?? textColors[0];
-  const currentHighlight = (textStyleAttributes.backgroundColor as string | undefined) ?? highlightColors[0];
+  const highlightAttributes = editor.getAttributes("highlight");
+  const currentTextColor = (textStyleAttributes.color as string | undefined) ?? textColors[0].value;
+  const currentHighlight = (highlightAttributes.color as string | undefined) ?? highlightColors[0].value;
   const currentFontFamily = (textStyleAttributes.fontFamily as string | undefined) ?? "";
   const currentFontSize = (textStyleAttributes.fontSize as string | undefined) ?? "";
 
@@ -656,24 +846,28 @@ export function RichTextEditor({
             </option>
           ))}
         </select>
-        <label className="color-tool" title="文字颜色">
-          <Palette size={15} />
-          <input
-            type="color"
-            aria-label="文字颜色"
-            value={currentTextColor}
-            onChange={(event) => editor.chain().focus().setColor(event.target.value).run()}
-          />
-        </label>
-        <label className="color-tool" title="背景高亮">
-          <Highlighter size={15} />
-          <input
-            type="color"
-            aria-label="背景高亮"
-            value={currentHighlight}
-            onChange={(event) => editor.chain().focus().setBackgroundColor(event.target.value).run()}
-          />
-        </label>
+        <ColorPaletteButton
+          ariaLabel="文字颜色"
+          clearLabel="清除文字颜色"
+          colors={textColors}
+          currentColor={currentTextColor}
+          icon={<Palette size={15} />}
+          isOpen={openColorPalette === "text"}
+          onClear={clearTextColor}
+          onSelect={setTextColor}
+          onToggle={() => toggleColorPalette("text")}
+        />
+        <ColorPaletteButton
+          ariaLabel="背景高亮"
+          clearLabel="清除背景高亮"
+          colors={highlightColors}
+          currentColor={currentHighlight}
+          icon={<Highlighter size={15} />}
+          isOpen={openColorPalette === "highlight"}
+          onClear={clearHighlightColor}
+          onSelect={setHighlightColor}
+          onToggle={() => toggleColorPalette("highlight")}
+        />
         <span className="toolbar-divider" />
         <button type="button" className="tool-button" onClick={() => editor.chain().focus().insertTable({ rows: 3, cols: 3, withHeaderRow: true }).run()} title="插入表格">
           <Table2 size={16} />

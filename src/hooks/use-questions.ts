@@ -3,19 +3,26 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { createQuestion, listQuestions, searchSimilarQuestions, updateQuestionTitle } from "@/data/questions";
 import { deleteQuestion } from "@/data/deletions";
+import { useDebouncedValue } from "@/hooks/use-debounced-value";
+import { canSearchSimilarTitle, toLimitedSearchTerm } from "@/lib/text-limits";
 
 export function useQuestions(search: string) {
+  const debouncedSearch = useDebouncedValue(toLimitedSearchTerm(search));
+
   return useQuery({
-    queryKey: ["questions", search],
-    queryFn: () => listQuestions(search)
+    queryKey: ["questions", debouncedSearch],
+    queryFn: () => listQuestions(debouncedSearch)
   });
 }
 
 export function useSimilarQuestions(input: string) {
+  const debouncedInput = useDebouncedValue(toLimitedSearchTerm(input));
+  const enabled = canSearchSimilarTitle(input) && debouncedInput.length > 0;
+
   return useQuery({
-    queryKey: ["questions", "similar", input],
-    queryFn: () => searchSimilarQuestions(input),
-    enabled: input.trim().length > 0
+    queryKey: ["questions", "similar", debouncedInput],
+    queryFn: () => searchSimilarQuestions(debouncedInput),
+    enabled
   });
 }
 

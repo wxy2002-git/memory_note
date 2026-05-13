@@ -1,5 +1,6 @@
 import { getSupabaseConfigStatus } from "@/lib/env";
 import { requireSupabaseBrowserClient } from "@/lib/supabase/client";
+import { requireCurrentUser } from "@/data/auth";
 
 const maxImageSizeBytes = 8 * 1024 * 1024;
 
@@ -34,18 +35,7 @@ export async function uploadImageAsset(documentId: string, file: File): Promise<
     throw new Error("Supabase 尚未配置。");
   }
 
-  const {
-    data: { user },
-    error: userError
-  } = await supabase.auth.getUser();
-
-  if (userError) {
-    throw userError;
-  }
-
-  if (!user) {
-    throw new Error("请先登录。");
-  }
+  const user = await requireCurrentUser();
 
   const fileName = getSafeFileName(file.name);
   const storagePath = `${user.id}/${documentId}/${crypto.randomUUID()}-${fileName}`;

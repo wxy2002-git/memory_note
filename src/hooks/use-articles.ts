@@ -12,6 +12,8 @@ import {
   updateArticleTitle
 } from "@/data/articles";
 import { deleteArticle } from "@/data/deletions";
+import { useDebouncedValue } from "@/hooks/use-debounced-value";
+import { canSearchSimilarTitle, toLimitedSearchTerm } from "@/lib/text-limits";
 
 export function useQuestionDetail(questionId: string) {
   return useQuery({
@@ -21,17 +23,22 @@ export function useQuestionDetail(questionId: string) {
 }
 
 export function useArticles(questionId: string, search: string) {
+  const debouncedSearch = useDebouncedValue(toLimitedSearchTerm(search));
+
   return useQuery({
-    queryKey: ["articles", questionId, search],
-    queryFn: () => listArticles(questionId, search)
+    queryKey: ["articles", questionId, debouncedSearch],
+    queryFn: () => listArticles(questionId, debouncedSearch)
   });
 }
 
 export function useSimilarArticles(questionId: string, input: string) {
+  const debouncedInput = useDebouncedValue(toLimitedSearchTerm(input));
+  const enabled = canSearchSimilarTitle(input) && debouncedInput.length > 0;
+
   return useQuery({
-    queryKey: ["articles", questionId, "similar", input],
-    queryFn: () => searchSimilarArticles(questionId, input),
-    enabled: input.trim().length > 0
+    queryKey: ["articles", questionId, "similar", debouncedInput],
+    queryFn: () => searchSimilarArticles(questionId, debouncedInput),
+    enabled
   });
 }
 

@@ -1,18 +1,22 @@
 "use client";
 
 import {
-  addEdge,
   applyEdgeChanges,
   applyNodeChanges,
   Background,
+  ConnectionMode,
   Controls,
+  Handle,
+  MarkerType,
   MiniMap,
+  Position,
   ReactFlow,
   type Connection,
   type Edge,
   type EdgeChange,
   type Node,
   type NodeChange,
+  type NodeProps,
   type OnSelectionChangeParams,
   type Viewport
 } from "@xyflow/react";
@@ -26,31 +30,282 @@ import {
   useSaveFlowchart,
   useUpdateFlowchartTitle
 } from "@/hooks/use-flowcharts";
+import { MAX_TITLE_LENGTH } from "@/lib/text-limits";
 import type { FlowchartListItem, SaveStatus } from "@/types/domain";
 
 type FlowchartPanelProps = {
   documentId: string;
+  onClose?: () => void;
 };
 
-function normalizeNodes(nodes: unknown[]): Node[] {
-  return nodes.filter((node): node is Node => {
+const EDGE_COLOR = "#2f6f73";
+
+const NODE_SHAPES = [
+  { value: "process", label: "过程" },
+  { value: "terminator", label: "开始/结束" },
+  { value: "decision", label: "判断" },
+  { value: "document", label: "文档" },
+  { value: "database", label: "数据" },
+  { value: "input", label: "输入/输出" },
+  { value: "note", label: "注释" }
+] as const;
+
+const EDGE_TYPES = [
+  { value: "smoothstep", label: "圆角线" },
+  { value: "default", label: "曲线" },
+  { value: "straight", label: "直线" },
+  { value: "step", label: "折线" }
+] as const;
+
+const EDGE_PATTERNS = [
+  { value: "solid", label: "实线" },
+  { value: "dashed", label: "虚线" },
+  { value: "dotted", label: "点线" }
+] as const;
+
+const EDGE_ARROWS = [
+  { value: "end", label: "单箭头" },
+  { value: "none", label: "无箭头" },
+  { value: "both", label: "双向" }
+] as const;
+
+type FlowNodeShape = (typeof NODE_SHAPES)[number]["value"];
+type FlowEdgeType = (typeof EDGE_TYPES)[number]["value"];
+type FlowEdgePattern = (typeof EDGE_PATTERNS)[number]["value"];
+type FlowEdgeArrow = (typeof EDGE_ARROWS)[number]["value"];
+
+type FlowNodeData = {
+  label?: string;
+  shape?: FlowNodeShape;
+};
+
+type FlowEdgeData = {
+  pattern?: FlowEdgePattern;
+  arrow?: FlowEdgeArrow;
+};
+
+type FlowchartNode = Node<FlowNodeData, "flowNode">;
+type FlowchartEdge = Edge<FlowEdgeData, FlowEdgeType>;
+
+const handlePositions = [
+  { id: "top", position: Position.Top },
+  { id: "right", position: Position.Right },
+  { id: "bottom", position: Position.Bottom },
+  { id: "left", position: Position.Left }
+] as const;
+
+function isNodeShape(value: unknown): value is FlowNodeShape {
+  return NODE_SHAPES.some((shape) => shape.value === value);
+}
+
+function isEdgeType(value: unknown): value is FlowEdgeType {
+  return EDGE_TYPES.some((edgeType) => edgeType.value === value);
+}
+
+function isEdgePattern(value: unknown): value is FlowEdgePattern {
+  return EDGE_PATTERNS.some((pattern) => pattern.value === value);
+}
+
+function isEdgeArrow(value: unknown): value is FlowEdgeArrow {
+  return EDGE_ARROWS.some((arrow) => arrow.value === value);
+}
+
+function getNodeShape(value: unknown): FlowNodeShape {
+  return isNodeShape(value) ? value : "process";
+}
+
+function getEdgeType(value: unknown): FlowEdgeType {
+  return isEdgeType(value) ? value : "smoothstep";
+}
+
+function getEdgePattern(edge: Partial<FlowchartEdge>): FlowEdgePattern {
+  if (isEdgePattern(edge.data?.pattern)) {
+    return edge.data.pattern;
+  }
+
+  const strokeDasharray = edge.style?.strokeDasharray;
+
+  if (typeof strokeDasharray === "string") {
+    if (strokeDasharray.includes("2")) {
+      return "dotted";
+    }
+
+    return "dashed";
+  }
+
+  return "solid";
+}
+
+function getEdgeArrow(edge: Partial<FlowchartEdge>): FlowEdgeArrow {
+  if (isEdgeArrow(edge.data?.arrow)) {
+    return edge.data.arrow;
+  }
+
+  if (edge.markerStart && edge.markerEnd) {
+    return "both";
+  }
+
+  if (!edge.markerEnd) {
+    return "none";
+  }
+
+  return "end";
+}
+
+function getEdgeAppearance(pattern: FlowEdgePattern, arrow: FlowEdgeArrow) {
+  const strokeDasharray =
+    pattern === "dashed" ? "9 7" : pattern === "dotted" ? "2 7" : undefined;
+  const marker = { type: MarkerType.ArrowClosed, color: EDGE_COLOR, width: 18, height: 18 };
+
+  return {
+    animated: pattern === "dotted",
+    markerStart: arrow === "both" ? marker : undefined,
+    markerEnd: arrow === "none" ? undefined : marker,
+    style: {
+      stroke: EDGE_COLOR,
+      strokeWidth: 2.2,
+      strokeDasharray,
+      strokeLinecap: "round" as const
+    }
+  };
+}
+
+function applyEdgeAppearance(
+  edge: FlowchartEdge,
+  updates: Partial<{ type: FlowEdgeType; pattern: FlowEdgePattern; arrow: FlowEdgeArrow }> = {}
+): FlowchartEdge {
+  const nextType = updates.type ?? getEdgeType(edge.type);
+  const nextPattern = updates.pattern ?? getEdgePattern(edge);
+  const nextArrow = updates.arrow ?? getEdgeArrow(edge);
+
+  return {
+    ...edge,
+    type: nextType,
+    data: {
+      ...edge.data,
+      pattern: nextPattern,
+      arrow: nextArrow
+    },
+    ...getEdgeAppearance(nextPattern, nextArrow)
+  };
+}
+
+function createFlowchartEdge(
+  connection: Connection,
+  type: FlowEdgeType,
+  pattern: FlowEdgePattern,
+  arrow: FlowEdgeArrow
+): FlowchartEdge | null {
+  if (!connection.source || !connection.target) {
+    return null;
+  }
+
+  return applyEdgeAppearance(
+    {
+      id: `edge-${connection.source}-${connection.target}-${Date.now()}`,
+      source: connection.source,
+      target: connection.target,
+      sourceHandle: connection.sourceHandle,
+      targetHandle: connection.targetHandle,
+      type,
+      data: {
+        pattern,
+        arrow
+      }
+    },
+    { type, pattern, arrow }
+  );
+}
+
+function FlowNode({ data, selected }: NodeProps<FlowchartNode>) {
+  const shape = getNodeShape(data.shape);
+  const label = makeNodeLabel(data.label);
+
+  return (
+    <div className={`flow-node flow-node-${shape} ${selected ? "is-selected" : ""}`}>
+      {handlePositions.map((handle) => (
+        <Handle
+          key={`${handle.id}-target`}
+          id={`${handle.id}-target`}
+          type="target"
+          position={handle.position}
+          className={`flow-handle flow-handle-${handle.id} flow-handle-target`}
+        />
+      ))}
+      {handlePositions.map((handle) => (
+        <Handle
+          key={`${handle.id}-source`}
+          id={`${handle.id}-source`}
+          type="source"
+          position={handle.position}
+          className={`flow-handle flow-handle-${handle.id} flow-handle-source`}
+        />
+      ))}
+      <div className="flow-node-content">
+        <span className="flow-node-label">{label}</span>
+      </div>
+    </div>
+  );
+}
+
+const nodeTypes = {
+  flowNode: FlowNode
+};
+
+function normalizeNodes(nodes: unknown[]): FlowchartNode[] {
+  return nodes.flatMap((node): FlowchartNode[] => {
     if (!node || typeof node !== "object") {
-      return false;
+      return [];
     }
 
     const candidate = node as Partial<Node>;
-    return typeof candidate.id === "string" && Boolean(candidate.position) && Boolean(candidate.data);
+    if (typeof candidate.id !== "string" || !candidate.position || !candidate.data) {
+      return [];
+    }
+
+    const data = candidate.data as FlowNodeData;
+
+    return [
+      {
+        ...(candidate as Node),
+        id: candidate.id,
+        type: "flowNode",
+        position: candidate.position,
+        data: {
+          ...data,
+          label: makeNodeLabel(data.label),
+          shape: getNodeShape(data.shape)
+        }
+      }
+    ];
   });
 }
 
-function normalizeEdges(edges: unknown[]): Edge[] {
-  return edges.filter((edge): edge is Edge => {
+function normalizeEdges(edges: unknown[]): FlowchartEdge[] {
+  return edges.flatMap((edge): FlowchartEdge[] => {
     if (!edge || typeof edge !== "object") {
-      return false;
+      return [];
     }
 
     const candidate = edge as Partial<Edge>;
-    return typeof candidate.id === "string" && typeof candidate.source === "string" && typeof candidate.target === "string";
+    if (typeof candidate.id !== "string" || typeof candidate.source !== "string" || typeof candidate.target !== "string") {
+      return [];
+    }
+
+    return [
+      applyEdgeAppearance({
+        ...(candidate as Edge),
+        id: candidate.id,
+        source: candidate.source,
+        target: candidate.target,
+        type: getEdgeType(candidate.type),
+        data: {
+          ...((candidate.data ?? {}) as FlowEdgeData),
+          pattern: getEdgePattern(candidate as Partial<FlowchartEdge>),
+          arrow: getEdgeArrow(candidate as Partial<FlowchartEdge>)
+        }
+      })
+    ];
   });
 }
 
@@ -78,7 +333,7 @@ function makeNodeLabel(value: unknown) {
   return "未命名节点";
 }
 
-export function FlowchartPanel({ documentId }: FlowchartPanelProps) {
+export function FlowchartPanel({ documentId, onClose }: FlowchartPanelProps) {
   const flowcharts = useFlowcharts(documentId);
   const createFlowchart = useCreateFlowchart(documentId);
   const updateTitle = useUpdateFlowchartTitle(documentId);
@@ -87,16 +342,21 @@ export function FlowchartPanel({ documentId }: FlowchartPanelProps) {
   const [activeId, setActiveId] = useState<string | null>(null);
   const [newTitle, setNewTitle] = useState("");
   const [titleDraft, setTitleDraft] = useState("");
-  const [nodes, setNodes] = useState<Node[]>([]);
-  const [edges, setEdges] = useState<Edge[]>([]);
+  const [nodes, setNodes] = useState<FlowchartNode[]>([]);
+  const [edges, setEdges] = useState<FlowchartEdge[]>([]);
   const [viewport, setViewport] = useState<Viewport>({ x: 0, y: 0, zoom: 1 });
   const [selectedNodeIds, setSelectedNodeIds] = useState<string[]>([]);
   const [selectedEdgeIds, setSelectedEdgeIds] = useState<string[]>([]);
   const [editingNodeId, setEditingNodeId] = useState<string | null>(null);
   const [nodeLabelDraft, setNodeLabelDraft] = useState("");
+  const [preferredNodeShape, setPreferredNodeShape] = useState<FlowNodeShape>("process");
+  const [preferredEdgeType, setPreferredEdgeType] = useState<FlowEdgeType>("smoothstep");
+  const [preferredEdgePattern, setPreferredEdgePattern] = useState<FlowEdgePattern>("solid");
+  const [preferredEdgeArrow, setPreferredEdgeArrow] = useState<FlowEdgeArrow>("end");
   const [saveStatus, setSaveStatus] = useState<SaveStatus>("idle");
   const [isFullscreen, setIsFullscreen] = useState(false);
   const saveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const newTitleTooLong = newTitle.trim().length > MAX_TITLE_LENGTH;
   const loadedFlowchartIdRef = useRef<string | null>(null);
 
   const activeFlowchart = useMemo(
@@ -157,7 +417,12 @@ export function FlowchartPanel({ documentId }: FlowchartPanelProps) {
     };
   }, []);
 
-  function queueSave(nextNodes: Node[], nextEdges: Edge[], nextViewport: Viewport, flowchart: FlowchartListItem | null = activeFlowchart) {
+  function queueSave(
+    nextNodes: FlowchartNode[],
+    nextEdges: FlowchartEdge[],
+    nextViewport: Viewport,
+    flowchart: FlowchartListItem | null = activeFlowchart
+  ) {
     if (!flowchart) {
       return;
     }
@@ -188,6 +453,10 @@ export function FlowchartPanel({ documentId }: FlowchartPanelProps) {
   function handleCreate(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
 
+    if (newTitleTooLong) {
+      return;
+    }
+
     createFlowchart.mutate(newTitle || "未命名流程图", {
       onSuccess: (flowchartId) => {
         setNewTitle("");
@@ -199,7 +468,7 @@ export function FlowchartPanel({ documentId }: FlowchartPanelProps) {
   function handleTitleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
 
-    if (!activeFlowchart || !titleDraft.trim() || titleDraft.trim() === activeFlowchart.title) {
+    if (!activeFlowchart || !titleDraft.trim() || titleDraft.trim().length > MAX_TITLE_LENGTH || titleDraft.trim() === activeFlowchart.title) {
       return;
     }
 
@@ -210,19 +479,37 @@ export function FlowchartPanel({ documentId }: FlowchartPanelProps) {
   }
 
   function handleNodesChange(changes: NodeChange[]) {
-    const nextNodes = applyNodeChanges(changes, nodes);
+    const nextNodes = applyNodeChanges(changes, nodes) as FlowchartNode[];
     setNodes(nextNodes);
     queueSave(nextNodes, edges, viewport);
   }
 
   function handleEdgesChange(changes: EdgeChange[]) {
-    const nextEdges = applyEdgeChanges(changes, edges);
+    const nextEdges = applyEdgeChanges(changes, edges) as FlowchartEdge[];
     setEdges(nextEdges);
     queueSave(nodes, nextEdges, viewport);
   }
 
   function handleConnect(connection: Connection) {
-    const nextEdges = addEdge(connection, edges);
+    const nextEdge = createFlowchartEdge(connection, preferredEdgeType, preferredEdgePattern, preferredEdgeArrow);
+
+    if (!nextEdge) {
+      return;
+    }
+
+    if (
+      edges.some(
+        (edge) =>
+          edge.source === nextEdge.source &&
+          edge.target === nextEdge.target &&
+          edge.sourceHandle === nextEdge.sourceHandle &&
+          edge.targetHandle === nextEdge.targetHandle
+      )
+    ) {
+      return;
+    }
+
+    const nextEdges = [...edges, nextEdge];
     setEdges(nextEdges);
     queueSave(nodes, nextEdges, viewport);
   }
@@ -252,14 +539,23 @@ export function FlowchartPanel({ documentId }: FlowchartPanelProps) {
       return;
     }
 
-    const nextEdges: Edge[] = [
-      ...edges,
+    const nextEdge = createFlowchartEdge(
       {
-        id: `edge-${source}-${target}-${Date.now()}`,
         source,
-        target
-      }
-    ];
+        target,
+        sourceHandle: "right-source",
+        targetHandle: "left-target"
+      },
+      preferredEdgeType,
+      preferredEdgePattern,
+      preferredEdgeArrow
+    );
+
+    if (!nextEdge) {
+      return;
+    }
+
+    const nextEdges = [...edges, nextEdge];
 
     setEdges(nextEdges);
     queueSave(nodes, nextEdges, viewport);
@@ -284,17 +580,18 @@ export function FlowchartPanel({ documentId }: FlowchartPanelProps) {
 
   function addNode() {
     const id = `node-${Date.now()}`;
-    const nextNodes: Node[] = [
+    const nextNodes: FlowchartNode[] = [
       ...nodes,
       {
         id,
-        type: "default",
+        type: "flowNode",
         position: {
           x: 120 + nodes.length * 28,
           y: 120 + nodes.length * 18
         },
         data: {
-          label: "新节点"
+          label: "新节点",
+          shape: preferredNodeShape
         }
       }
     ];
@@ -303,7 +600,7 @@ export function FlowchartPanel({ documentId }: FlowchartPanelProps) {
     queueSave(nextNodes, edges, viewport);
   }
 
-  function startNodeEdit(node: Node) {
+  function startNodeEdit(node: FlowchartNode) {
     setEditingNodeId(node.id);
     setNodeLabelDraft(makeNodeLabel(node.data?.label));
   }
@@ -413,6 +710,70 @@ export function FlowchartPanel({ documentId }: FlowchartPanelProps) {
     deleteFlowchart.mutate(activeFlowchart.id);
   }
 
+  const selectedNodes = useMemo(
+    () => nodes.filter((node) => selectedNodeIds.includes(node.id)),
+    [nodes, selectedNodeIds]
+  );
+  const selectedEdges = useMemo(
+    () => edges.filter((edge) => selectedEdgeIds.includes(edge.id)),
+    [edges, selectedEdgeIds]
+  );
+  const currentNodeShape = selectedNodes.length > 0 ? getNodeShape(selectedNodes[0].data.shape) : preferredNodeShape;
+  const currentEdgeType = selectedEdges.length > 0 ? getEdgeType(selectedEdges[0].type) : preferredEdgeType;
+  const currentEdgePattern = selectedEdges.length > 0 ? getEdgePattern(selectedEdges[0]) : preferredEdgePattern;
+  const currentEdgeArrow = selectedEdges.length > 0 ? getEdgeArrow(selectedEdges[0]) : preferredEdgeArrow;
+
+  function applyNodeShape(shape: FlowNodeShape) {
+    setPreferredNodeShape(shape);
+
+    if (selectedNodeIds.length === 0) {
+      return;
+    }
+
+    const nextNodes = nodes.map((node) =>
+      selectedNodeIds.includes(node.id)
+        ? {
+            ...node,
+            data: {
+              ...node.data,
+              shape
+            }
+          }
+        : node
+    );
+
+    setNodes(nextNodes);
+    queueSave(nextNodes, edges, viewport);
+  }
+
+  function applyEdgeType(type: FlowEdgeType) {
+    setPreferredEdgeType(type);
+    updateSelectedEdges({ type });
+  }
+
+  function applyEdgePattern(pattern: FlowEdgePattern) {
+    setPreferredEdgePattern(pattern);
+    updateSelectedEdges({ pattern });
+  }
+
+  function applyEdgeArrow(arrow: FlowEdgeArrow) {
+    setPreferredEdgeArrow(arrow);
+    updateSelectedEdges({ arrow });
+  }
+
+  function updateSelectedEdges(updates: Partial<{ type: FlowEdgeType; pattern: FlowEdgePattern; arrow: FlowEdgeArrow }>) {
+    if (selectedEdgeIds.length === 0) {
+      return;
+    }
+
+    const nextEdges = edges.map((edge) =>
+      selectedEdgeIds.includes(edge.id) ? applyEdgeAppearance(edge, updates) : edge
+    );
+
+    setEdges(nextEdges);
+    queueSave(nodes, nextEdges, viewport);
+  }
+
   const connectionNodeIds = getConnectionNodeIds();
 
   return (
@@ -422,10 +783,17 @@ export function FlowchartPanel({ documentId }: FlowchartPanelProps) {
           <p className="eyebrow">流程图</p>
           <h2>把这篇正文画成结构</h2>
         </div>
-        <button className="secondary-button" type="button" onClick={() => setIsFullscreen((value) => !value)}>
-          {isFullscreen ? <Minimize2 size={15} /> : <Maximize2 size={15} />}
-          {isFullscreen ? "退出全屏" : "全屏"}
-        </button>
+        <div className="flowchart-heading-actions">
+          <button className="secondary-button" type="button" onClick={() => setIsFullscreen((value) => !value)}>
+            {isFullscreen ? <Minimize2 size={15} /> : <Maximize2 size={15} />}
+            {isFullscreen ? "退出全屏" : "全屏"}
+          </button>
+          {onClose ? (
+            <button className="tool-button panel-close-button" type="button" onClick={onClose} aria-label="收起流程图" title="收起">
+              <X size={16} />
+            </button>
+          ) : null}
+        </div>
       </div>
 
       <div className="flowchart-body">
@@ -435,9 +803,10 @@ export function FlowchartPanel({ documentId }: FlowchartPanelProps) {
               aria-label="新建流程图标题"
               placeholder="新建流程图..."
               value={newTitle}
+              maxLength={MAX_TITLE_LENGTH}
               onChange={(event) => setNewTitle(event.target.value)}
             />
-            <button className="icon-button" type="submit" disabled={createFlowchart.isPending} aria-label="新建流程图">
+            <button className="icon-button" type="submit" disabled={newTitleTooLong || createFlowchart.isPending} aria-label="新建流程图">
               <FilePlus2 size={16} />
             </button>
           </form>
@@ -476,9 +845,15 @@ export function FlowchartPanel({ documentId }: FlowchartPanelProps) {
                   <input
                     aria-label="流程图标题"
                     value={titleDraft}
+                    maxLength={MAX_TITLE_LENGTH}
                     onChange={(event) => setTitleDraft(event.target.value)}
                     onBlur={() => {
-                      if (activeFlowchart && titleDraft.trim() && titleDraft.trim() !== activeFlowchart.title) {
+                      if (
+                        activeFlowchart &&
+                        titleDraft.trim() &&
+                        titleDraft.trim().length <= MAX_TITLE_LENGTH &&
+                        titleDraft.trim() !== activeFlowchart.title
+                      ) {
                         updateTitle.mutate({ flowchartId: activeFlowchart.id, title: titleDraft });
                       }
                     }}
@@ -487,6 +862,58 @@ export function FlowchartPanel({ documentId }: FlowchartPanelProps) {
                 <button className="tool-button" type="button" onClick={addNode} title="新增节点">
                   <Plus size={16} />
                 </button>
+                <label className="flowchart-tool-group" title={selectedNodeIds.length ? "修改选中节点形状" : "设置新节点形状"}>
+                  <span>节点</span>
+                  <select
+                    value={currentNodeShape}
+                    onChange={(event) => applyNodeShape(event.target.value as FlowNodeShape)}
+                  >
+                    {NODE_SHAPES.map((shape) => (
+                      <option key={shape.value} value={shape.value}>
+                        {shape.label}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                <label className="flowchart-tool-group" title={selectedEdgeIds.length ? "修改选中线条形态" : "设置新线条形态"}>
+                  <span>线型</span>
+                  <select
+                    value={currentEdgeType}
+                    onChange={(event) => applyEdgeType(event.target.value as FlowEdgeType)}
+                  >
+                    {EDGE_TYPES.map((edgeType) => (
+                      <option key={edgeType.value} value={edgeType.value}>
+                        {edgeType.label}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                <label className="flowchart-tool-group" title={selectedEdgeIds.length ? "修改选中线条样式" : "设置新线条样式"}>
+                  <span>样式</span>
+                  <select
+                    value={currentEdgePattern}
+                    onChange={(event) => applyEdgePattern(event.target.value as FlowEdgePattern)}
+                  >
+                    {EDGE_PATTERNS.map((pattern) => (
+                      <option key={pattern.value} value={pattern.value}>
+                        {pattern.label}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                <label className="flowchart-tool-group" title={selectedEdgeIds.length ? "修改选中线条箭头" : "设置新线条箭头"}>
+                  <span>箭头</span>
+                  <select
+                    value={currentEdgeArrow}
+                    onChange={(event) => applyEdgeArrow(event.target.value as FlowEdgeArrow)}
+                  >
+                    {EDGE_ARROWS.map((arrow) => (
+                      <option key={arrow.value} value={arrow.value}>
+                        {arrow.label}
+                      </option>
+                    ))}
+                  </select>
+                </label>
                 <button
                   className="tool-button danger-tool"
                   type="button"
@@ -562,6 +989,8 @@ export function FlowchartPanel({ documentId }: FlowchartPanelProps) {
                   key={activeFlowchart.id}
                   nodes={nodes}
                   edges={edges}
+                  nodeTypes={nodeTypes}
+                  connectionMode={ConnectionMode.Loose}
                   defaultViewport={viewport}
                   fitView={nodes.length === 0}
                   onNodesChange={handleNodesChange}
@@ -577,7 +1006,7 @@ export function FlowchartPanel({ documentId }: FlowchartPanelProps) {
                 </ReactFlow>
                 <div className="flowchart-hint">
                   <Expand size={14} />
-                  双击节点编辑文字，拖出连线建立关系
+                  双击节点编辑文字，从节点四边拖出连线
                 </div>
               </div>
             </>

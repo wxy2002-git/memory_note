@@ -12,6 +12,7 @@ import {
 import { useNavigationState } from "@/hooks/use-navigation-state";
 import { getReadableError } from "@/data/errors";
 import { ConfirmDialog } from "@/components/common/confirm-dialog";
+import { MAX_TITLE_LENGTH } from "@/lib/text-limits";
 import type { QuestionListItem } from "@/types/domain";
 
 function formatDate(value: string) {
@@ -46,6 +47,7 @@ function NewQuestionPanel() {
   const createQuestion = useCreateQuestion();
   const similarQuestions = useSimilarQuestions(title);
   const normalizedTitle = title.trim();
+  const titleTooLong = normalizedTitle.length > MAX_TITLE_LENGTH;
   const exactMatch = useMemo(
     () => similarQuestions.data?.some((question) => question.title.trim() === normalizedTitle),
     [normalizedTitle, similarQuestions.data]
@@ -54,7 +56,7 @@ function NewQuestionPanel() {
   function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
 
-    if (!normalizedTitle || exactMatch) {
+    if (!normalizedTitle || titleTooLong || exactMatch) {
       return;
     }
 
@@ -76,9 +78,10 @@ function NewQuestionPanel() {
           aria-label="新问题标题"
           placeholder="例如：社会运转的规律是什么？"
           value={title}
+          maxLength={MAX_TITLE_LENGTH}
           onChange={(event) => setTitle(event.target.value)}
         />
-        <button className="primary-button compact" type="submit" disabled={!normalizedTitle || exactMatch || createQuestion.isPending}>
+        <button className="primary-button compact" type="submit" disabled={!normalizedTitle || titleTooLong || exactMatch || createQuestion.isPending}>
           <Plus size={16} />
           新建
         </button>
@@ -90,6 +93,7 @@ function NewQuestionPanel() {
             <span>相似问题</span>
             {similarQuestions.isFetching ? <small>查询中</small> : null}
           </div>
+          {titleTooLong ? <p className="form-error">问题标题最多 {MAX_TITLE_LENGTH} 个字符。</p> : null}
           {exactMatch ? <p className="form-error">已存在同名问题，不能重复创建。</p> : null}
           {similarQuestions.data?.length ? (
             <ul>
@@ -150,6 +154,7 @@ function QuestionRow({ question }: { question: QuestionListItem }) {
           <div className="inline-edit">
             <input
               value={draftTitle}
+              maxLength={MAX_TITLE_LENGTH}
               onChange={(event) => setDraftTitle(event.target.value)}
               onKeyDown={(event) => {
                 if (event.key === "Enter") {

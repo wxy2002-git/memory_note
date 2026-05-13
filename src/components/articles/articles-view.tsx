@@ -17,6 +17,7 @@ import { useNavigationState } from "@/hooks/use-navigation-state";
 import { getReadableError } from "@/data/errors";
 import { ensureArticleDocument } from "@/data/articles";
 import { ConfirmDialog } from "@/components/common/confirm-dialog";
+import { MAX_TITLE_LENGTH } from "@/lib/text-limits";
 import type { ArticleListItem } from "@/types/domain";
 
 function formatDate(value: string) {
@@ -39,6 +40,7 @@ function NewArticlePanel({ questionId }: { questionId: string }) {
   const createArticle = useCreateArticle(questionId);
   const similarArticles = useSimilarArticles(questionId, title);
   const normalizedTitle = title.trim();
+  const titleTooLong = normalizedTitle.length > MAX_TITLE_LENGTH;
   const exactMatch = useMemo(
     () => similarArticles.data?.some((article) => article.title.trim() === normalizedTitle),
     [normalizedTitle, similarArticles.data]
@@ -47,7 +49,7 @@ function NewArticlePanel({ questionId }: { questionId: string }) {
   function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
 
-    if (!normalizedTitle || exactMatch) {
+    if (!normalizedTitle || titleTooLong || exactMatch) {
       return;
     }
 
@@ -67,9 +69,10 @@ function NewArticlePanel({ questionId }: { questionId: string }) {
           aria-label="新回答标题"
           placeholder="例如：社会系统如何自组织"
           value={title}
+          maxLength={MAX_TITLE_LENGTH}
           onChange={(event) => setTitle(event.target.value)}
         />
-        <button className="primary-button compact" type="submit" disabled={!normalizedTitle || exactMatch || createArticle.isPending}>
+        <button className="primary-button compact" type="submit" disabled={!normalizedTitle || titleTooLong || exactMatch || createArticle.isPending}>
           <Plus size={16} />
           新建
         </button>
@@ -81,6 +84,7 @@ function NewArticlePanel({ questionId }: { questionId: string }) {
             <span>相似标题</span>
             {similarArticles.isFetching ? <small>查询中</small> : null}
           </div>
+          {titleTooLong ? <p className="form-error">回答标题最多 {MAX_TITLE_LENGTH} 个字符。</p> : null}
           {exactMatch ? <p className="form-error">该问题下已有同名回答标题。</p> : null}
           {similarArticles.data?.length ? (
             <ul>
@@ -184,6 +188,7 @@ function ArticleRow({ article, questionTitle }: { article: ArticleListItem; ques
           <div className="inline-edit">
             <input
               value={draftTitle}
+              maxLength={MAX_TITLE_LENGTH}
               onChange={(event) => setDraftTitle(event.target.value)}
               onKeyDown={(event) => {
                 if (event.key === "Enter") saveTitle();
