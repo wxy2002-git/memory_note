@@ -1,6 +1,6 @@
 "use client";
 
-import { Check, FileText, Plus, Search, Trash2, X } from "lucide-react";
+import { Check, Download, FileText, Plus, Search, Trash2, X } from "lucide-react";
 import { FormEvent, useMemo, useState } from "react";
 import {
   useCreateQuestion,
@@ -12,6 +12,7 @@ import {
 import { useNavigationState } from "@/hooks/use-navigation-state";
 import { getReadableError } from "@/data/errors";
 import { ConfirmDialog } from "@/components/common/confirm-dialog";
+import { downloadTextFile } from "@/lib/download";
 import { MAX_TITLE_LENGTH } from "@/lib/text-limits";
 import type { QuestionListItem } from "@/types/domain";
 
@@ -251,6 +252,28 @@ export function QuestionsView() {
   const questions = useQuestions(search);
   const filteredQuestions = questions.data ? filterQuestions(questions.data, filter) : undefined;
 
+  function exportQuestionIndex() {
+    if (!filteredQuestions?.length) {
+      return;
+    }
+
+    downloadTextFile(
+      "questions-index.json",
+      JSON.stringify(
+        filteredQuestions.map((question) => ({
+          title: question.title,
+          answerCount: question.answerCount,
+          nonEmptyBodyCount: question.nonEmptyBodyCount,
+          hasQuestionInsight: question.hasQuestionInsight,
+          updatedAt: question.updatedAt
+        })),
+        null,
+        2
+      ),
+      "application/json"
+    );
+  }
+
   return (
     <section className="questions-layout">
       <div className="page-heading">
@@ -258,6 +281,12 @@ export function QuestionsView() {
           <p className="eyebrow">问题库</p>
           <h1>围绕问题管理阅读材料</h1>
           <p>搜索、筛选和管理你的问题库。</p>
+        </div>
+        <div className="heading-actions">
+          <button className="secondary-button" type="button" onClick={exportQuestionIndex} disabled={!filteredQuestions?.length}>
+            <Download size={16} />
+            导出索引
+          </button>
         </div>
       </div>
 
@@ -299,6 +328,7 @@ export function QuestionsView() {
             <div className="empty-state">
               <h2>{search || filter !== "all" ? "没有匹配的问题" : "还没有问题"}</h2>
               <p>{search || filter !== "all" ? "尝试调整搜索条件或筛选。" : "先创建一个你正在追问的主题，之后就可以往里面放文章和见解。"}</p>
+              {!search && filter === "all" ? <span className="empty-state-hint">右侧的新建问题面板已经准备好了。</span> : null}
             </div>
           ) : null}
 

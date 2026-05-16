@@ -623,6 +623,28 @@ p {
   margin-bottom: 8px;
 }
 
+.empty-state-hint {
+  display: inline-flex;
+  margin-top: 14px;
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  background: var(--soft);
+  padding: 7px 10px;
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.export-actions {
+  display: inline-flex;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.secondary-button.icon-only {
+  width: 36px;
+  padding: 0;
+}
+
 .article-list {
   display: grid;
 }
@@ -916,6 +938,11 @@ p {
   display: inline-flex;
 }
 
+.link-picker {
+  position: relative;
+  display: inline-flex;
+}
+
 .color-trigger {
   position: relative;
 }
@@ -986,6 +1013,45 @@ p {
     inset 0 0 0 1px rgb(255 255 255 / 45%);
 }
 
+.link-popover {
+  position: absolute;
+  top: calc(100% + 8px);
+  left: 0;
+  z-index: 36;
+  display: grid;
+  grid-template-columns: minmax(190px, 1fr) 34px 34px 34px;
+  gap: 8px;
+  width: min(430px, calc(100vw - 32px));
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: #fff;
+  padding: 10px;
+  box-shadow: 0 18px 50px rgb(32 36 42 / 18%);
+}
+
+.link-popover input {
+  min-width: 0;
+  height: 34px;
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  padding: 0 10px;
+  color: var(--text);
+  font: inherit;
+}
+
+.link-popover input:focus {
+  outline: none;
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px rgb(37 111 122 / 14%);
+}
+
+.link-popover-error {
+  grid-column: 1 / -1;
+  color: var(--danger);
+  font-size: 12px;
+  line-height: 1.4;
+}
+
 .toolbar-divider {
   width: 1px;
   height: 24px;
@@ -1028,6 +1094,33 @@ p {
   padding: 9px 12px;
   color: var(--danger);
   font-size: 13px;
+}
+
+.editor-inline-info {
+  margin: 0;
+  border-bottom: 1px solid #bfdbfe;
+  background: #eff6ff;
+  padding: 9px 12px;
+  color: #1d4ed8;
+  font-size: 13px;
+}
+
+.editor-recovery-panel {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.editor-recovery-panel span {
+  flex: 1;
+  min-width: 220px;
+}
+
+.editor-recovery-panel .secondary-button {
+  height: 30px;
+  padding: 0 10px;
+  font-size: 12px;
 }
 
 .editor-loading {
@@ -2144,6 +2237,14 @@ p {
 
   .document-heading {
     display: grid;
+  }
+
+  .export-actions {
+    width: 100%;
+  }
+
+  .export-actions .secondary-button:first-child {
+    flex: 1;
   }
 
   .editor-toolbar {

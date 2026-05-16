@@ -48,9 +48,16 @@ export async function uploadImageAsset(documentId: string, file: File): Promise<
     throw uploadError;
   }
 
-  const [signedUrlResult, assetResult] = await Promise.all([
-    supabase.storage.from(config.storageBucket).createSignedUrl(storagePath, 60 * 60 * 24 * 365),
-    supabase.from("assets").insert({
+  const signedUrlResult = await supabase.storage.from(config.storageBucket).createSignedUrl(storagePath, 60 * 60 * 24 * 365);
+
+  if (signedUrlResult.error) {
+    await supabase.storage.from(config.storageBucket).remove([storagePath]).catch(() => undefined);
+    throw signedUrlResult.error;
+  }
+
+  const assetResult = await supabase
+    .from("assets")
+    .insert({
       user_id: user.id,
       document_id: documentId,
       asset_type: "image",
@@ -59,14 +66,10 @@ export async function uploadImageAsset(documentId: string, file: File): Promise<
       file_name: file.name || fileName,
       mime_type: file.type,
       size_bytes: file.size
-    })
-  ]);
-
-  if (signedUrlResult.error) {
-    throw signedUrlResult.error;
-  }
+    });
 
   if (assetResult.error) {
+    await supabase.storage.from(config.storageBucket).remove([storagePath]).catch(() => undefined);
     throw assetResult.error;
   }
 

@@ -6,22 +6,19 @@ import {
   Background,
   ConnectionMode,
   Controls,
-  Handle,
   MarkerType,
   MiniMap,
-  Position,
   ReactFlow,
   type Connection,
   type Edge,
   type EdgeChange,
   type Node,
   type NodeChange,
-  type NodeProps,
   type OnSelectionChangeParams,
   type Viewport
 } from "@xyflow/react";
 import { Check, Expand, FilePlus2, GitBranch, Maximize2, Minimize2, Plus, Save, Trash2, X } from "lucide-react";
-import { FormEvent, useEffect, useMemo, useRef, useState } from "react";
+import { FormEvent, useEffect, useRef, useState } from "react";
 import { getReadableError } from "@/data/errors";
 import {
   useCreateFlowchart,
@@ -32,6 +29,15 @@ import {
 } from "@/hooks/use-flowcharts";
 import { MAX_TITLE_LENGTH } from "@/lib/text-limits";
 import type { FlowchartListItem, SaveStatus } from "@/types/domain";
+import {
+  getNodeShape,
+  makeNodeLabel,
+  NODE_SHAPES,
+  nodeTypes,
+  type FlowchartNode,
+  type FlowNodeData,
+  type FlowNodeShape
+} from "@/components/flowcharts/flowchart-node";
 
 type FlowchartPanelProps = {
   documentId: string;
@@ -39,16 +45,6 @@ type FlowchartPanelProps = {
 };
 
 const EDGE_COLOR = "#2f6f73";
-
-const NODE_SHAPES = [
-  { value: "process", label: "过程" },
-  { value: "terminator", label: "开始/结束" },
-  { value: "decision", label: "判断" },
-  { value: "document", label: "文档" },
-  { value: "database", label: "数据" },
-  { value: "input", label: "输入/输出" },
-  { value: "note", label: "注释" }
-] as const;
 
 const EDGE_TYPES = [
   { value: "smoothstep", label: "圆角线" },
@@ -69,34 +65,16 @@ const EDGE_ARROWS = [
   { value: "both", label: "双向" }
 ] as const;
 
-type FlowNodeShape = (typeof NODE_SHAPES)[number]["value"];
 type FlowEdgeType = (typeof EDGE_TYPES)[number]["value"];
 type FlowEdgePattern = (typeof EDGE_PATTERNS)[number]["value"];
 type FlowEdgeArrow = (typeof EDGE_ARROWS)[number]["value"];
-
-type FlowNodeData = {
-  label?: string;
-  shape?: FlowNodeShape;
-};
 
 type FlowEdgeData = {
   pattern?: FlowEdgePattern;
   arrow?: FlowEdgeArrow;
 };
 
-type FlowchartNode = Node<FlowNodeData, "flowNode">;
 type FlowchartEdge = Edge<FlowEdgeData, FlowEdgeType>;
-
-const handlePositions = [
-  { id: "top", position: Position.Top },
-  { id: "right", position: Position.Right },
-  { id: "bottom", position: Position.Bottom },
-  { id: "left", position: Position.Left }
-] as const;
-
-function isNodeShape(value: unknown): value is FlowNodeShape {
-  return NODE_SHAPES.some((shape) => shape.value === value);
-}
 
 function isEdgeType(value: unknown): value is FlowEdgeType {
   return EDGE_TYPES.some((edgeType) => edgeType.value === value);
@@ -108,10 +86,6 @@ function isEdgePattern(value: unknown): value is FlowEdgePattern {
 
 function isEdgeArrow(value: unknown): value is FlowEdgeArrow {
   return EDGE_ARROWS.some((arrow) => arrow.value === value);
-}
-
-function getNodeShape(value: unknown): FlowNodeShape {
-  return isNodeShape(value) ? value : "process";
 }
 
 function getEdgeType(value: unknown): FlowEdgeType {
@@ -217,41 +191,6 @@ function createFlowchartEdge(
   );
 }
 
-function FlowNode({ data, selected }: NodeProps<FlowchartNode>) {
-  const shape = getNodeShape(data.shape);
-  const label = makeNodeLabel(data.label);
-
-  return (
-    <div className={`flow-node flow-node-${shape} ${selected ? "is-selected" : ""}`}>
-      {handlePositions.map((handle) => (
-        <Handle
-          key={`${handle.id}-target`}
-          id={`${handle.id}-target`}
-          type="target"
-          position={handle.position}
-          className={`flow-handle flow-handle-${handle.id} flow-handle-target`}
-        />
-      ))}
-      {handlePositions.map((handle) => (
-        <Handle
-          key={`${handle.id}-source`}
-          id={`${handle.id}-source`}
-          type="source"
-          position={handle.position}
-          className={`flow-handle flow-handle-${handle.id} flow-handle-source`}
-        />
-      ))}
-      <div className="flow-node-content">
-        <span className="flow-node-label">{label}</span>
-      </div>
-    </div>
-  );
-}
-
-const nodeTypes = {
-  flowNode: FlowNode
-};
-
 function normalizeNodes(nodes: unknown[]): FlowchartNode[] {
   return nodes.flatMap((node): FlowchartNode[] => {
     if (!node || typeof node !== "object") {
@@ -325,14 +264,6 @@ function isSameViewport(left: Viewport, right: Viewport) {
   return left.x === right.x && left.y === right.y && left.zoom === right.zoom;
 }
 
-function makeNodeLabel(value: unknown) {
-  if (typeof value === "string") {
-    return value;
-  }
-
-  return "未命名节点";
-}
-
 export function FlowchartPanel({ documentId, onClose }: FlowchartPanelProps) {
   const flowcharts = useFlowcharts(documentId);
   const createFlowchart = useCreateFlowchart(documentId);
@@ -355,17 +286,18 @@ export function FlowchartPanel({ documentId, onClose }: FlowchartPanelProps) {
   const [preferredEdgeArrow, setPreferredEdgeArrow] = useState<FlowEdgeArrow>("end");
   const [saveStatus, setSaveStatus] = useState<SaveStatus>("idle");
   const [isFullscreen, setIsFullscreen] = useState(false);
+  const panelRef = useRef<HTMLElement | null>(null);
   const saveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const newTitleTooLong = newTitle.trim().length > MAX_TITLE_LENGTH;
   const loadedFlowchartIdRef = useRef<string | null>(null);
+  const localIdCounter = useRef(0);
 
-  const activeFlowchart = useMemo(
-    () => flowcharts.data?.find((flowchart) => flowchart.id === activeId) ?? null,
-    [activeId, flowcharts.data]
-  );
+  const activeFlowchart = flowcharts.data?.find((flowchart) => flowchart.id === activeId) ?? null;
 
   useEffect(() => {
     if (!flowcharts.data?.length) {
+      // Local editor state mirrors the currently loaded remote flowchart list.
+      // eslint-disable-next-line react-hooks/set-state-in-effect
       setActiveId(null);
       return;
     }
@@ -378,6 +310,8 @@ export function FlowchartPanel({ documentId, onClose }: FlowchartPanelProps) {
   useEffect(() => {
     if (!activeFlowchart) {
       loadedFlowchartIdRef.current = null;
+      // Local canvas state is reset when there is no active remote flowchart.
+      // eslint-disable-next-line react-hooks/set-state-in-effect
       setNodes([]);
       setEdges([]);
       setViewport({ x: 0, y: 0, zoom: 1 });
@@ -387,6 +321,7 @@ export function FlowchartPanel({ documentId, onClose }: FlowchartPanelProps) {
     }
 
     if (loadedFlowchartIdRef.current === activeFlowchart.id) {
+      // Keep the editable title draft in sync with remote title updates.
       setTitleDraft(activeFlowchart.title);
       return;
     }
@@ -398,6 +333,7 @@ export function FlowchartPanel({ documentId, onClose }: FlowchartPanelProps) {
       saveTimer.current = null;
     }
 
+    // Hydrate the local canvas editor from the selected saved flowchart.
     setNodes(normalizeNodes(activeFlowchart.nodes));
     setEdges(normalizeEdges(activeFlowchart.edges));
     setViewport(normalizeViewport(activeFlowchart.viewport));
@@ -579,7 +515,8 @@ export function FlowchartPanel({ documentId, onClose }: FlowchartPanelProps) {
   }
 
   function addNode() {
-    const id = `node-${Date.now()}`;
+    localIdCounter.current += 1;
+    const id = `node-${localIdCounter.current}`;
     const nextNodes: FlowchartNode[] = [
       ...nodes,
       {
@@ -673,6 +610,54 @@ export function FlowchartPanel({ documentId, onClose }: FlowchartPanelProps) {
     queueSave(nextNodes, nextEdges, viewport);
   }
 
+  function duplicateSelectedNodes() {
+    if (selectedNodes.length === 0) {
+      return;
+    }
+
+    localIdCounter.current += 1;
+    const duplicateBatchId = localIdCounter.current;
+    const idMap = new Map<string, string>();
+    const duplicatedNodes = selectedNodes.map((node, index): FlowchartNode => {
+      const nextId = `node-${duplicateBatchId}-${index}`;
+      idMap.set(node.id, nextId);
+
+      return {
+        ...node,
+        id: nextId,
+        selected: true,
+        position: {
+          x: node.position.x + 36,
+          y: node.position.y + 36
+        },
+        data: {
+          ...node.data,
+          label: `${makeNodeLabel(node.data.label)} 副本`
+        }
+      };
+    });
+    const duplicatedEdges = edges
+      .filter((edge) => idMap.has(edge.source) && idMap.has(edge.target))
+      .map((edge, index): FlowchartEdge =>
+        applyEdgeAppearance({
+          ...edge,
+          id: `edge-${duplicateBatchId}-${index}`,
+          source: idMap.get(edge.source)!,
+          target: idMap.get(edge.target)!,
+          selected: false
+        })
+      );
+    const nextNodes = [...nodes.map((node) => ({ ...node, selected: false })), ...duplicatedNodes];
+    const nextEdges = [...edges, ...duplicatedEdges];
+    const nextSelectedNodeIds = duplicatedNodes.map((node) => node.id);
+
+    setNodes(nextNodes);
+    setEdges(nextEdges);
+    setSelectedNodeIds(nextSelectedNodeIds);
+    setSelectedEdgeIds([]);
+    queueSave(nextNodes, nextEdges, viewport);
+  }
+
   function flushSave() {
     if (!activeFlowchart) {
       return;
@@ -710,14 +695,8 @@ export function FlowchartPanel({ documentId, onClose }: FlowchartPanelProps) {
     deleteFlowchart.mutate(activeFlowchart.id);
   }
 
-  const selectedNodes = useMemo(
-    () => nodes.filter((node) => selectedNodeIds.includes(node.id)),
-    [nodes, selectedNodeIds]
-  );
-  const selectedEdges = useMemo(
-    () => edges.filter((edge) => selectedEdgeIds.includes(edge.id)),
-    [edges, selectedEdgeIds]
-  );
+  const selectedNodes = nodes.filter((node) => selectedNodeIds.includes(node.id));
+  const selectedEdges = edges.filter((edge) => selectedEdgeIds.includes(edge.id));
   const currentNodeShape = selectedNodes.length > 0 ? getNodeShape(selectedNodes[0].data.shape) : preferredNodeShape;
   const currentEdgeType = selectedEdges.length > 0 ? getEdgeType(selectedEdges[0].type) : preferredEdgeType;
   const currentEdgePattern = selectedEdges.length > 0 ? getEdgePattern(selectedEdges[0]) : preferredEdgePattern;
@@ -776,8 +755,55 @@ export function FlowchartPanel({ documentId, onClose }: FlowchartPanelProps) {
 
   const connectionNodeIds = getConnectionNodeIds();
 
+  useEffect(() => {
+    function handleShortcut(event: KeyboardEvent) {
+      const activeElement = document.activeElement;
+      const target = event.target;
+      const isFormField =
+        target instanceof HTMLInputElement ||
+        target instanceof HTMLTextAreaElement ||
+        target instanceof HTMLSelectElement ||
+        (target instanceof HTMLElement && target.isContentEditable);
+      const isInsidePanel = Boolean(activeElement && panelRef.current?.contains(activeElement));
+
+      if (!isInsidePanel || isFormField) {
+        return;
+      }
+
+      const key = event.key.toLowerCase();
+
+      if (key === "delete" || key === "backspace") {
+        event.preventDefault();
+        deleteSelection();
+        return;
+      }
+
+      if (key === "escape") {
+        event.preventDefault();
+        cancelNodeEdit();
+        setSelectedNodeIds([]);
+        setSelectedEdgeIds([]);
+        return;
+      }
+
+      if ((event.ctrlKey || event.metaKey) && !event.altKey && key === "s") {
+        event.preventDefault();
+        flushSave();
+        return;
+      }
+
+      if ((event.ctrlKey || event.metaKey) && !event.altKey && key === "d") {
+        event.preventDefault();
+        duplicateSelectedNodes();
+      }
+    }
+
+    window.addEventListener("keydown", handleShortcut);
+    return () => window.removeEventListener("keydown", handleShortcut);
+  });
+
   return (
-    <section className={`flowchart-panel ${isFullscreen ? "fullscreen" : ""}`}>
+    <section className={`flowchart-panel ${isFullscreen ? "fullscreen" : ""}`} ref={panelRef} tabIndex={-1}>
       <div className="flowchart-heading">
         <div>
           <p className="eyebrow">流程图</p>

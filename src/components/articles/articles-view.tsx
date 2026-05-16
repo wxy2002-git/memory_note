@@ -283,13 +283,34 @@ function ArticleRow({ article, questionTitle }: { article: ArticleListItem; ques
   );
 }
 
+type ArticleFilter = "all" | "preferred" | "empty-body" | "has-body" | "needs-insight" | "has-flowcharts";
+
+function filterArticles(articles: ArticleListItem[], filter: ArticleFilter) {
+  switch (filter) {
+    case "preferred":
+      return articles.filter((article) => article.isPreferred);
+    case "empty-body":
+      return articles.filter((article) => article.bodyIsEmpty);
+    case "has-body":
+      return articles.filter((article) => !article.bodyIsEmpty);
+    case "needs-insight":
+      return articles.filter((article) => !article.hasArticleInsight || article.articleInsightIsEmpty);
+    case "has-flowcharts":
+      return articles.filter((article) => article.flowchartCount > 0);
+    default:
+      return articles;
+  }
+}
+
 export function ArticlesView({ questionId }: { questionId: string }) {
   const [search, setSearch] = useState("");
+  const [filter, setFilter] = useState<ArticleFilter>("all");
   const openQuestions = useNavigationState((state) => state.openQuestions);
   const question = useQuestionDetail(questionId);
   const articles = useArticles(questionId, search);
   const ensureInsight = useEnsureQuestionInsight(questionId);
   const openDocument = useNavigationState((state) => state.openDocument);
+  const filteredArticles = articles.data ? filterArticles(articles.data, filter) : undefined;
 
   return (
     <section className="questions-layout">
@@ -345,19 +366,39 @@ export function ArticlesView({ questionId }: { questionId: string }) {
                 onChange={(event) => setSearch(event.target.value)}
               />
             </div>
+            <div className="filter-tabs">
+              {([
+                ["all", "全部"],
+                ["preferred", "首选"],
+                ["empty-body", "空正文"],
+                ["has-body", "有正文"],
+                ["needs-insight", "缺见解"],
+                ["has-flowcharts", "有流程图"]
+              ] as const).map(([value, label]) => (
+                <button
+                  key={value}
+                  type="button"
+                  className={`filter-tab ${filter === value ? "active" : ""}`}
+                  onClick={() => setFilter(value)}
+                >
+                  {label}
+                </button>
+              ))}
+            </div>
           </div>
 
           {articles.isLoading ? <p className="state-text">正在读取回答标题...</p> : null}
           {articles.error ? <p className="form-error">{getReadableError(articles.error)}</p> : null}
-          {!articles.isLoading && !articles.data?.length ? (
+          {!articles.isLoading && !filteredArticles?.length ? (
             <div className="empty-state">
-              <h2>这个问题还没有回答文章</h2>
-              <p>先添加一篇文章标题，后续就可以进入正文保存原文和自己的见解。</p>
+              <h2>{search || filter !== "all" ? "没有匹配的回答" : "这个问题还没有回答文章"}</h2>
+              <p>{search || filter !== "all" ? "尝试调整搜索词或筛选条件。" : "先添加一篇文章标题，后续就可以进入正文保存原文和自己的见解。"}</p>
+              {!search && filter === "all" ? <span className="empty-state-hint">右侧可以直接添加第一篇回答。</span> : null}
             </div>
           ) : null}
 
           <div className="article-list">
-            {articles.data?.map((article) => (
+            {filteredArticles?.map((article) => (
               <ArticleRow key={article.id} article={article} questionTitle={question.data?.title} />
             ))}
           </div>

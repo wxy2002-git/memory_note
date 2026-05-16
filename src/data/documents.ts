@@ -20,6 +20,7 @@ export type SaveDocumentInput = {
   contentHtml: string;
   plainText: string;
   wordCount: number;
+  previousContentVersion: number;
   nextContentVersion: number;
 };
 
@@ -68,7 +69,7 @@ export async function getDocument(documentId: string): Promise<DocumentDetail> {
 
 export async function saveDocument(input: SaveDocumentInput) {
   const supabase = requireSupabaseBrowserClient();
-  const { error } = await supabase
+  const { data, error } = await supabase
     .from("documents")
     .update({
       content_json: input.contentJson,
@@ -77,9 +78,16 @@ export async function saveDocument(input: SaveDocumentInput) {
       word_count: input.wordCount,
       content_version: input.nextContentVersion
     })
-    .eq("id", input.documentId);
+    .eq("id", input.documentId)
+    .eq("content_version", input.previousContentVersion)
+    .select("id")
+    .maybeSingle();
 
   if (error) {
     throw error;
+  }
+
+  if (!data) {
+    throw new Error("正文已在其他窗口或设备更新。请刷新后再继续编辑，避免覆盖新内容。");
   }
 }

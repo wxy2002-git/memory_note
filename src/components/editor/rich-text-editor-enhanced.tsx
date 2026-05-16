@@ -42,6 +42,8 @@ import {
   Undo2
 } from "lucide-react";
 import { ChangeEvent, type ReactNode, useEffect, useMemo, useRef, useState } from "react";
+import { LinkPopover } from "@/components/editor/link-popover";
+import { downloadTextFile } from "@/lib/download";
 import type { SaveStatus } from "@/types/domain";
 
 type RichTextEditorProps = {
@@ -53,6 +55,7 @@ type RichTextEditorProps = {
     contentHtml: string;
     plainText: string;
     wordCount: number;
+    previousContentVersion: number;
     nextContentVersion: number;
   }) => Promise<void>;
   onImageUpload?: (file: File) => Promise<string>;
@@ -241,10 +244,18 @@ export function RichTextEditor({
   onCreateDerivedQuestion
 }: RichTextEditorProps) {
   const [saveStatus, setSaveStatus] = useState<SaveStatus>("idle");
+  const [saveError, setSaveError] = useState<string | null>(null);
   const [imageError, setImageError] = useState<string | null>(null);
+  const [failedImageFiles, setFailedImageFiles] = useState<File[]>([]);
+  const [imageUploadProgress, setImageUploadProgress] = useState<{ uploaded: number; total: number } | null>(null);
   const [isUploadingImage, setIsUploadingImage] = useState(false);
   const [openColorPalette, setOpenColorPalette] = useState<"text" | "highlight" | null>(null);
+  const [isLinkPopoverOpen, setIsLinkPopoverOpen] = useState(false);
+  const [linkDraft, setLinkDraft] = useState("");
+  const [linkError, setLinkError] = useState<string | null>(null);
   const editorRef = useRef<Editor | null>(null);
+  const editorShellRef = useRef<HTMLDivElement | null>(null);
+  const linkPickerRef = useRef<HTMLDivElement | null>(null);
   const saveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const imageInputRef = useRef<HTMLInputElement | null>(null);
   const savedSelectionRef = useRef<{ from: number; to: number } | null>(null);
@@ -253,9 +264,16 @@ export function RichTextEditor({
   const objectUrlsToRevoke = useRef(new Set<string>());
   const versionRef = useRef(initialVersion);
   const saveStatusRef = useRef<SaveStatus>("idle");
+  const saveRef = useRef<(currentEditor?: Editor | null) => Promise<void>>(async () => undefined);
+  const openLinkPopoverRef = useRef<() => void>(() => undefined);
   const isSettingInitialContent = useRef(false);
   const hasLoadedInitialContent = useRef(false);
   const initialContent = useMemo(() => getInitialContent(initialContentJson), [initialContentJson]);
+
+  function updateSaveStatus(status: SaveStatus) {
+    saveStatusRef.current = status;
+    setSaveStatus(status);
+  }
 
   const editor = useEditor({
     immediatelyRender: false,
@@ -359,6 +377,7 @@ export function RichTextEditor({
       }
 
       updateSaveStatus("dirty");
+      setSaveError(null);
 
       if (saveTimer.current) {
         clearTimeout(saveTimer.current);
@@ -392,38 +411,8 @@ export function RichTextEditor({
     });
   }, [editor, initialContent, initialVersion]);
 
-  useEffect(() => {
-    function handleBeforeUnload(event: BeforeUnloadEvent) {
-      if (saveStatusRef.current === "dirty" || saveStatusRef.current === "saving") {
-        if (saveTimer.current) {
-          clearTimeout(saveTimer.current);
-          saveTimer.current = null;
-        }
-        void save(editorRef.current);
-        event.preventDefault();
-      }
-    }
-
-    window.addEventListener("beforeunload", handleBeforeUnload);
-    return () => {
-      window.removeEventListener("beforeunload", handleBeforeUnload);
-      if (saveTimer.current) {
-        clearTimeout(saveTimer.current);
-      }
-
-      for (const url of objectUrlsToRevoke.current) {
-        URL.revokeObjectURL(url);
-      }
-    };
-  }, []);
-
-  function updateSaveStatus(status: SaveStatus) {
-    saveStatusRef.current = status;
-    setSaveStatus(status);
-  }
-
-  async function save(currentEditor = editor) {
-    const activeEditor = currentEditor ?? editorRef.current;
+  async function save(currentEditor?: Editor | null) {
+    const activeEditor = currentEditor ?? editor ?? editorRef.current;
 
     if (!activeEditor) {
       return;
@@ -443,7 +432,8 @@ export function RichTextEditor({
     updateSaveStatus("saving");
 
     const plainText = activeEditor.getText();
-    const nextVersion = versionRef.current + 1;
+    const previousVersion = versionRef.current;
+    const nextVersion = previousVersion + 1;
 
     try {
       await onSave({
@@ -451,33 +441,204 @@ export function RichTextEditor({
         contentHtml: activeEditor.getHTML(),
         plainText,
         wordCount: countText(plainText),
+        previousContentVersion: previousVersion,
         nextContentVersion: nextVersion
       });
       versionRef.current = nextVersion;
       updateSaveStatus("saved");
-    } catch {
+      setSaveError(null);
+    } catch (error) {
+      setSaveError(error instanceof Error ? error.message : "保存失败，请稍后重试。");
       updateSaveStatus("error");
     }
   }
 
-  function setLink() {
+  function exportDraft() {
+    const activeEditor = editorRef.current ?? editor;
+
+    if (!activeEditor) {
+      return;
+    }
+
+    const timestamp = new Date().toISOString().replace(/[:.]/g, "-");
+
+    downloadTextFile(`note-draft-${timestamp}.html`, activeEditor.getHTML(), "text/html");
+  }
+
+  useEffect(() => {
+    saveRef.current = save;
+  });
+
+  useEffect(() => {
+    const objectUrls = objectUrlsToRevoke.current;
+
+    function handleBeforeUnload(event: BeforeUnloadEvent) {
+      if (saveStatusRef.current === "dirty" || saveStatusRef.current === "saving") {
+        if (saveTimer.current) {
+          clearTimeout(saveTimer.current);
+          saveTimer.current = null;
+        }
+        void saveRef.current(editorRef.current);
+        event.preventDefault();
+      }
+    }
+
+    window.addEventListener("beforeunload", handleBeforeUnload);
+    return () => {
+      window.removeEventListener("beforeunload", handleBeforeUnload);
+      if (saveTimer.current) {
+        clearTimeout(saveTimer.current);
+      }
+
+      for (const url of objectUrls) {
+        URL.revokeObjectURL(url);
+      }
+    };
+  }, []);
+
+  function normalizeLinkUrl(value: string) {
+    const trimmed = value.trim();
+
+    if (!trimmed) {
+      return "";
+    }
+
+    if (trimmed.startsWith("/") || trimmed.startsWith("#") || /^mailto:|^tel:/i.test(trimmed)) {
+      return trimmed;
+    }
+
+    const withProtocol = /^[a-z][a-z\d+.-]*:/i.test(trimmed) ? trimmed : `https://${trimmed}`;
+    const url = new URL(withProtocol);
+
+    if (url.protocol !== "http:" && url.protocol !== "https:") {
+      throw new Error("只支持 http、https、mailto、tel 或站内链接。");
+    }
+
+    return url.toString();
+  }
+
+  function openLinkPopover() {
     if (!editor) {
       return;
     }
 
-    const previousUrl = editor.getAttributes("link").href as string | undefined;
-    const url = window.prompt("输入链接地址", previousUrl ?? "");
+    rememberSelection();
+    setOpenColorPalette(null);
+    setLinkDraft((editor.getAttributes("link").href as string | undefined) ?? "");
+    setLinkError(null);
+    setIsLinkPopoverOpen(true);
+  }
 
-    if (url === null) {
+  useEffect(() => {
+    openLinkPopoverRef.current = openLinkPopover;
+  });
+
+  useEffect(() => {
+    function handleEditorShortcut(event: KeyboardEvent) {
+      const isModifierPressed = event.ctrlKey || event.metaKey;
+
+      if (!isModifierPressed || event.altKey) {
+        return;
+      }
+
+      const activeElement = document.activeElement;
+      const isInsideEditor =
+        editorRef.current?.isFocused ||
+        Boolean(activeElement && editorShellRef.current?.contains(activeElement));
+
+      if (!isInsideEditor) {
+        return;
+      }
+
+      const key = event.key.toLowerCase();
+
+      if (key === "s") {
+        event.preventDefault();
+        void saveRef.current(editorRef.current);
+        return;
+      }
+
+      if (key === "k") {
+        event.preventDefault();
+        openLinkPopoverRef.current();
+      }
+    }
+
+    window.addEventListener("keydown", handleEditorShortcut);
+    return () => window.removeEventListener("keydown", handleEditorShortcut);
+  }, []);
+
+  function closeLinkPopover() {
+    setIsLinkPopoverOpen(false);
+    setLinkError(null);
+  }
+
+  useEffect(() => {
+    if (!isLinkPopoverOpen) {
       return;
     }
 
-    if (url.trim() === "") {
-      editor.chain().focus().extendMarkRange("link").unsetLink().run();
+    function handlePointerDown(event: PointerEvent) {
+      const target = event.target;
+
+      if (target instanceof Node && linkPickerRef.current?.contains(target)) {
+        return;
+      }
+
+      closeLinkPopover();
+    }
+
+    function handleEscape(event: KeyboardEvent) {
+      if (event.key === "Escape") {
+        event.preventDefault();
+        closeLinkPopover();
+      }
+    }
+
+    window.addEventListener("pointerdown", handlePointerDown);
+    window.addEventListener("keydown", handleEscape);
+    return () => {
+      window.removeEventListener("pointerdown", handlePointerDown);
+      window.removeEventListener("keydown", handleEscape);
+    };
+  }, [isLinkPopoverOpen]);
+
+  function applyLink() {
+    const chain = getSelectionChain();
+
+    if (!chain) {
       return;
     }
 
-    editor.chain().focus().extendMarkRange("link").setLink({ href: url.trim() }).run();
+    let normalizedUrl: string;
+
+    try {
+      normalizedUrl = normalizeLinkUrl(linkDraft);
+    } catch (error) {
+      setLinkError(error instanceof Error ? error.message : "链接格式不正确。");
+      return;
+    }
+
+    if (!normalizedUrl) {
+      chain.extendMarkRange("link").unsetLink().run();
+      closeLinkPopover();
+      return;
+    }
+
+    chain.extendMarkRange("link").setLink({ href: normalizedUrl }).run();
+    closeLinkPopover();
+  }
+
+  function removeLink() {
+    const chain = getSelectionChain();
+
+    if (!chain) {
+      return;
+    }
+
+    chain.extendMarkRange("link").unsetLink().run();
+    setLinkDraft("");
+    closeLinkPopover();
   }
 
   function setFontFamily(event: ChangeEvent<HTMLSelectElement>) {
@@ -588,6 +749,7 @@ export function RichTextEditor({
 
   function toggleColorPalette(palette: "text" | "highlight") {
     rememberSelection();
+    setIsLinkPopoverOpen(false);
     setOpenColorPalette((current) => (current === palette ? null : palette));
   }
 
@@ -604,6 +766,8 @@ export function RichTextEditor({
     }
 
     setImageError(null);
+    setFailedImageFiles([]);
+    setImageUploadProgress({ uploaded: 0, total: files.length });
     setIsUploadingImage(true);
     pendingImageUploads.current += files.length;
 
@@ -621,12 +785,19 @@ export function RichTextEditor({
           replaceImageSource(activeEditor, previewUrl, imageUrl, file.name);
           URL.revokeObjectURL(previewUrl);
           objectUrlsToRevoke.current.delete(previewUrl);
+          setImageUploadProgress((current) =>
+            current ? { ...current, uploaded: Math.min(current.total, current.uploaded + 1) } : current
+          );
         })
       );
 
       const failedCount = results.filter((result) => result.status === "rejected").length;
 
       if (failedCount > 0) {
+        const failedFiles = previews
+          .filter((_, index) => results[index]?.status === "rejected")
+          .map(({ file }) => file);
+
         for (const { previewUrl } of previews) {
           const isStillPreview = hasImageSource(activeEditor, previewUrl);
 
@@ -638,11 +809,15 @@ export function RichTextEditor({
         }
 
         const firstError = results.find((result): result is PromiseRejectedResult => result.status === "rejected")?.reason;
+        setFailedImageFiles(failedFiles);
         setImageError(firstError instanceof Error ? firstError.message : "图片上传失败。");
       }
     } finally {
       pendingImageUploads.current = Math.max(0, pendingImageUploads.current - files.length);
       setIsUploadingImage(pendingImageUploads.current > 0);
+      if (pendingImageUploads.current === 0) {
+        setImageUploadProgress(null);
+      }
 
       if (pendingImageUploads.current === 0 && (shouldSaveAfterImageUpload.current || saveStatusRef.current === "dirty")) {
         shouldSaveAfterImageUpload.current = false;
@@ -667,7 +842,7 @@ export function RichTextEditor({
   const currentFontSize = (textStyleAttributes.fontSize as string | undefined) ?? "";
 
   return (
-    <div className="editor-shell">
+    <div className="editor-shell" ref={editorShellRef}>
       <div className="editor-toolbar" aria-label="正文工具栏">
         <button type="button" className="tool-button" onClick={() => editor.chain().focus().undo().run()} title="撤销">
           <Undo2 size={16} />
@@ -789,14 +964,31 @@ export function RichTextEditor({
         <button type="button" className="tool-button" onClick={() => editor.chain().focus().setHorizontalRule().run()} title="分割线">
           <Minus size={16} />
         </button>
-        <button
-          type="button"
-          className={`tool-button ${editor.isActive("link") ? "active" : ""}`}
-          onClick={setLink}
-          title="链接"
-        >
-          <LinkIcon size={16} />
-        </button>
+        <div className="link-picker" ref={linkPickerRef}>
+          <button
+            type="button"
+            className={`tool-button ${editor.isActive("link") || isLinkPopoverOpen ? "active" : ""}`}
+            onClick={openLinkPopover}
+            title="链接"
+            aria-label="链接"
+            aria-expanded={isLinkPopoverOpen}
+          >
+            <LinkIcon size={16} />
+          </button>
+          {isLinkPopoverOpen ? (
+            <LinkPopover
+              value={linkDraft}
+              error={linkError}
+              onValueChange={(value) => {
+                setLinkDraft(value);
+                setLinkError(null);
+              }}
+              onApply={applyLink}
+              onRemove={removeLink}
+              onClose={closeLinkPopover}
+            />
+          ) : null}
+        </div>
         <label
           className={`tool-button ${!onImageUpload || isUploadingImage ? "disabled" : ""}`}
           title={isUploadingImage ? "图片上传中" : !onImageUpload ? "图片上传未配置" : "上传图片"}
@@ -907,7 +1099,38 @@ export function RichTextEditor({
         </span>
       </div>
 
-      {imageError ? <p className="editor-inline-error">{imageError}</p> : null}
+      {saveError ? (
+        <div className="editor-inline-error editor-recovery-panel">
+          <span>{saveError}</span>
+          <button className="secondary-button" type="button" onClick={() => void save()} disabled={saveStatus === "saving"}>
+            <Save size={14} />
+            重试保存
+          </button>
+          <button className="secondary-button" type="button" onClick={exportDraft}>
+            导出草稿
+          </button>
+        </div>
+      ) : null}
+      {imageUploadProgress ? (
+        <p className="editor-inline-info">
+          正在上传图片：{imageUploadProgress.uploaded}/{imageUploadProgress.total}
+        </p>
+      ) : null}
+      {imageError ? (
+        <div className="editor-inline-error editor-recovery-panel">
+          <span>{imageError}</span>
+          {failedImageFiles.length > 0 ? (
+            <button
+              className="secondary-button"
+              type="button"
+              onClick={() => void uploadImages(failedImageFiles)}
+              disabled={isUploadingImage}
+            >
+              重试图片上传
+            </button>
+          ) : null}
+        </div>
+      ) : null}
       {editor ? (
         <BubbleMenu editor={editor} className="bubble-menu">
           <button
@@ -950,7 +1173,7 @@ export function RichTextEditor({
           >
             <Highlighter size={15} />
           </button>
-          <button type="button" onClick={setLink} className={editor.isActive("link") ? "active" : ""} title="链接">
+          <button type="button" onClick={openLinkPopover} className={editor.isActive("link") ? "active" : ""} title="链接">
             <LinkIcon size={15} />
           </button>
           {showDerivedQuestionEntry && onCreateDerivedQuestion ? (

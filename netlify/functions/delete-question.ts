@@ -1,4 +1,4 @@
-import type { Config, Context } from "@netlify/functions";
+import type { Config } from "@netlify/functions";
 import {
   deleteQuestionCascade,
   getAdminClient,
@@ -8,7 +8,7 @@ import {
   requireAuthenticatedUser
 } from "./_shared/delete-records";
 
-export default async (req: Request, _context: Context) => {
+export default async function deleteQuestionHandler(req: Request) {
   try {
     if (req.method !== "POST") {
       return jsonResponse({ error: "Method not allowed" }, 405);
@@ -28,7 +28,7 @@ export default async (req: Request, _context: Context) => {
     console.error(error);
     return jsonResponse({ error: "删除问题失败，请稍后重试。" }, 500);
   }
-};
+}
 
 export const config: Config = {
   path: "/api/delete-question"

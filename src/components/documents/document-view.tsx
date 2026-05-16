@@ -1,6 +1,6 @@
 "use client";
 
-import { ArrowLeft, BookOpen, Check, FileText, GitBranch, Lightbulb } from "lucide-react";
+import { ArrowLeft, BookOpen, Check, Download, FileJson, FileText, GitBranch, Lightbulb } from "lucide-react";
 import { useRef, useState, type CSSProperties, type PointerEvent as ReactPointerEvent } from "react";
 import { ensureArticleDocument } from "@/data/articles";
 import { uploadImageAsset } from "@/data/assets";
@@ -12,6 +12,7 @@ import { useNavigationState } from "@/hooks/use-navigation-state";
 import { DerivedQuestionsPanel } from "@/components/derived-questions/derived-questions-panel";
 import { RichTextEditor } from "@/components/editor/rich-text-editor-enhanced";
 import { FlowchartPanel } from "@/components/flowcharts/flowchart-panel";
+import { downloadTextFile, safeDownloadName } from "@/lib/download";
 import type { DocumentType } from "@/types/domain";
 
 type DocumentViewProps = {
@@ -60,6 +61,66 @@ function getDocumentLabel(documentType: DocumentType) {
   }
 
   return "文章原文正文";
+}
+
+function htmlToMarkdownishText(html: string, plainText: string) {
+  if (!html.trim()) {
+    return plainText;
+  }
+
+  return html
+    .replace(/<h1[^>]*>([\s\S]*?)<\/h1>/gi, "# $1\n\n")
+    .replace(/<h2[^>]*>([\s\S]*?)<\/h2>/gi, "## $1\n\n")
+    .replace(/<h3[^>]*>([\s\S]*?)<\/h3>/gi, "### $1\n\n")
+    .replace(/<li[^>]*>([\s\S]*?)<\/li>/gi, "- $1\n")
+    .replace(/<\/p>/gi, "\n\n")
+    .replace(/<br\s*\/?>/gi, "\n")
+    .replace(/<[^>]+>/g, "")
+    .replace(/\n{3,}/g, "\n\n")
+    .trim();
+}
+
+function escapeHtml(value: string) {
+  return value
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;");
+}
+
+function createWordHtml(title: string, bodyHtml: string) {
+  const escapedTitle = escapeHtml(title);
+
+  return `<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <title>${escapedTitle}</title>
+  <style>
+    body {
+      font-family: "Microsoft YaHei", "PingFang SC", Arial, sans-serif;
+      line-height: 1.7;
+      color: #111827;
+    }
+    img {
+      max-width: 100%;
+      height: auto;
+    }
+    table {
+      border-collapse: collapse;
+      width: 100%;
+    }
+    td,
+    th {
+      border: 1px solid #d1d5db;
+      padding: 6px 8px;
+    }
+  </style>
+</head>
+<body>
+${bodyHtml}
+</body>
+</html>`;
 }
 
 export function DocumentView({
@@ -249,6 +310,57 @@ export function DocumentView({
       } as CSSProperties)
     : undefined;
 
+  function exportDocument(format: "html" | "markdown" | "json" | "word") {
+    if (!document.data) {
+      return;
+    }
+
+    const baseName = safeDownloadName(title);
+
+    if (format === "html") {
+      downloadTextFile(`${baseName}.html`, document.data.contentHtml, "text/html");
+      return;
+    }
+
+    if (format === "word") {
+      downloadTextFile(
+        `${baseName}.doc`,
+        createWordHtml(title, document.data.contentHtml),
+        "application/msword"
+      );
+      return;
+    }
+
+    if (format === "markdown") {
+      downloadTextFile(
+        `${baseName}.md`,
+        htmlToMarkdownishText(document.data.contentHtml, document.data.plainText),
+        "text/markdown"
+      );
+      return;
+    }
+
+    downloadTextFile(
+      `${baseName}.json`,
+      JSON.stringify(
+        {
+          title,
+          documentType,
+          questionTitle,
+          articleTitle,
+          contentJson: document.data.contentJson,
+          contentHtml: document.data.contentHtml,
+          plainText: document.data.plainText,
+          wordCount: document.data.wordCount,
+          updatedAt: document.data.updatedAt
+        },
+        null,
+        2
+      ),
+      "application/json"
+    );
+  }
+
   return (
     <section className={`document-layout ${activeSidePanel ? "with-side-panel" : ""}`} style={workspaceStyle}>
       <div className="document-heading">
@@ -290,6 +402,23 @@ export function DocumentView({
               <BookOpen size={16} />
               跳转首选回答
             </button>
+          ) : null}
+          {document.data ? (
+            <div className="export-actions" aria-label="导出正文">
+              <button className="secondary-button" type="button" onClick={() => exportDocument("markdown")}>
+                <Download size={16} />
+                Markdown
+              </button>
+              <button className="secondary-button icon-only" type="button" onClick={() => exportDocument("html")} aria-label="导出 HTML" title="导出 HTML">
+                <FileText size={16} />
+              </button>
+              <button className="secondary-button icon-only" type="button" onClick={() => exportDocument("word")} aria-label="导出 Word" title="导出 Word">
+                <FileText size={16} />
+              </button>
+              <button className="secondary-button icon-only" type="button" onClick={() => exportDocument("json")} aria-label="导出 JSON" title="导出 JSON">
+                <FileJson size={16} />
+              </button>
+            </div>
           ) : null}
         </div>
       </div>
